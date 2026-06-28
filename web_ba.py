@@ -7,7 +7,7 @@ try:
 except Exception:
     api_key=os.environ.get("ant_api1")
 client=anthropic.Anthropic(api_key=api_key)
-mqps=3
+mqps=2
 
 
 def ask_claude_stream(prompt, placeholder, mode2):
@@ -79,8 +79,8 @@ Two specific niches with traction potential and exactly why
 
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
-Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph.
-{"Keep the entire analysis under 465 words." if mode=="Quick" else "Be thourough & detailed. Prioritize depth over breadth"}
+Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph
+{"Keep the entire analysis under 465 words. Cover the most critical point per header" if mode=="Quick" else "Write 2-3 paragraphs per header. Each paragraph must add a new angle. Prioritize specificity - name real numbers, real players, real failure patterns - no fillers"}
 Never use special symbols. Write numbers and percentages in plain text"""
 
 
@@ -139,6 +139,7 @@ else:
                 label=first_line.replace("[Idea:", "").replace("]", "").strip()
                 st.success("Recognized as a business idea")
                 st.subheader(f"Idea: {label}")
+            st.divider()
             placeholder=st.empty()
             with st.spinner("Analyzing..."):
                 result=ask_claude_stream(analyze(cleaned_input, mode), placeholder, mode2)
@@ -161,3 +162,13 @@ with st.expander("Session history"):
         for item in st.session_state.history:
             st.caption(f" - {item}")
     else: st.caption("No analysis yet.")
+    
+with st.expander("About this tool"):
+    st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
+**How 2 Use:**
+- Type a company name or business idea and hit 'Analyze'
+- Quick mode gives you the sharpes single insight per section
+- Full mode goes deeper with multiple angles per section
+- Haiku is faster and less acute. Sonnet is slower but sharper
+
+**Limit:** 2 analysis per session, refersh to reset.""")
