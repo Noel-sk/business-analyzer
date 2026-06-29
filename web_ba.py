@@ -129,7 +129,6 @@ else:
             st.rerun()
 
     if st.session_state.is_running:
-        st.caption("Running...⏳")
         cleaned_input=st.session_state.pending_input
             
         with st.spinner("Recognizing..."):
@@ -179,4 +178,4 @@ with st.expander("About this tool"):
 - Full mode goes deeper with multiple angles per section
 - Haiku is faster and less acute. Sonnet is slower but sharper
 
-**Limit:** 2 analysis per session, refersh to reset.""")
+**Limit:** 2 analysis per session, refresh to reset.""")
