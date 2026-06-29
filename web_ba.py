@@ -85,8 +85,13 @@ Never use special symbols. Write numbers and percentages in plain text"""
 
 
 st.set_page_config(page_title="Business Analyzer", layout="centered")
-st.title("Business Analyzer")
-st.markdown("Enter a company name or business idea.\n Get A Straight-Forward Analysis. ")
+st.markdown("""<style>.block-container {padding-top: 2rem; padding-bottom: 2rem;}
+h1 {font-size: 1.8rem; font-weight: 700; margin-bottom: 0;}.stRadio label {font-size: 0.85rem;}
+.stTextInput input {border-radius: 8px;}.stButton button {border-radius: 8px; width: 100%;}
+.stExpander {border: none;}</style>""", unsafe_allow_html=True)
+
+st.title("Business Analyzer 📊 ")
+st.caption("Drop a company or idea, get it analyzed thoroughly")
 st.divider()
 
 if "query_count" not in st.session_state:
