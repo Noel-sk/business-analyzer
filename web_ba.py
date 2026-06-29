@@ -2,13 +2,13 @@ import streamlit as st
 import anthropic
 import os
 
+
 try:
     api_key=st.secrets["ant_api1"]
 except Exception:
     api_key=os.environ.get("ant_api1")
 client=anthropic.Anthropic(api_key=api_key)
-mqps=2
-
+mqps=3
 
 def ask_claude_stream(prompt, placeholder, mode2):
     try:
@@ -77,7 +77,6 @@ The underlying issue that quietly sinks businesses in this space and how to surv
 ### The Angle That Works
 Two specific niches with traction potential and exactly why
 
-
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
 Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph
 {"Keep the entire analysis under 465 words. Cover the most critical point per header" if mode=="Quick" else "Write 2-3 paragraphs per header. Each paragraph must add a new angle. Prioritize specificity - name real numbers, real players, real failure patterns - no fillers"}
@@ -100,6 +99,9 @@ if "is_running" not in st.session_state:
     st.session_state.is_running=False
 if "input_key" not in st.session_state:
     st.session_state.input_key=0
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input=""
+
 
 col1, col2=st.columns(2)
 with col1:
@@ -112,51 +114,57 @@ st.caption(f"{len(user_input)}/100 characters")
 
 
 if st.session_state.query_count>=mqps:
-    st.warning(f"Limit reached ({mqps} analyses). Refresh the page to continue.")
+    st.warning(f"You've used all {mqps} analyses this session. Refresh the page to start over.")
 else:
     if st.button("Analyze", disabled=st.session_state.is_running):
-        cleaned_input=user_input.strip()
-        if not cleaned_input: 
+        pending_input=user_input.strip()
+        if not pending_input: 
             st.warning("Please enter something.")
-        elif len(cleaned_input)> 100:
+        elif len(pending_input)> 100:
             st.warning("Input too long, please keep under 100 characters.")
         else:
             st.session_state.is_running=True
+            st.session_state.pending_input=pending_input
             st.session_state.query_count+=1
+            st.rerun()
+
+    if st.session_state.is_running:
+        st.caption("Running...⏳")
+        cleaned_input=st.session_state.pending_input
             
-            with st.spinner("Recognizing..."):
-                peek=client.messages.create(model="claude-haiku-4-5-20251001" if mode2=="Haiku" else "claude-sonnet-4-6", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with one word: [Company: name] or [Idea: 2-4 word label]'}])
-                first_line=peek.content[0].text.strip()
-            if "Company"  not in first_line and "Idea" not in first_line:
-                st.warning("Couldn't recognize input type. Try rephrasing.")
-                st.session_state.is_running=False
-                st.stop()
-            if "Company" in first_line:                                                                                          
-                label=first_line.replace("[Company:", "").replace("]", "").strip()
-                st.success("Recognized as an existing company")
-                st.subheader(f"Company: {label}")
-            else:
-                label=first_line.replace("[Idea:", "").replace("]", "").strip()
-                st.success("Recognized as a business idea")
-                st.subheader(f"Idea: {label}")
-            st.divider()
-            placeholder=st.empty()
-            with st.spinner("Analyzing..."):
-                result=ask_claude_stream(analyze(cleaned_input, mode), placeholder, mode2)
-            if result and result.startswith("ERROR"):
-                placeholder.error(result)
-
+        with st.spinner("Recognizing..."):
+            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with one word: [Company: name] or [Idea: 2-4 word label]'}])
+            first_line=peek.content[0].text.strip()
+        if "Company"  not in first_line and "Idea" not in first_line:
+            st.warning("Couldn't recognize input type. Try rephrasing.")
             st.session_state.is_running=False
-            st.toast("Analysis complete ✅")
-            st.session_state.analysis_done=True
-            st.session_state.history.append(label)
-            st.caption(f"{st.session_state.query_count}/{mqps} analyses used this session.")
+            st.stop()
+        if "Company" in first_line:                                                                                          
+            label=first_line.replace("[Company:", "").replace("]", "").strip()
+            st.success("Recognized as an existing company")
+            st.subheader(f"Company: {label}")
+        else:
+            label=first_line.replace("[Idea:", "").replace("]", "").strip()
+            st.success("Recognized as a business idea")
+            st.subheader(f"Idea: {label}")
+        st.divider()
+        placeholder=st.empty()
+        with st.spinner("Analyzing..."):
+            result=ask_claude_stream(analyze(cleaned_input, mode), placeholder, mode2)
+        if result and result.startswith("ERROR"):
+            placeholder.error(result)
 
-            if st.session_state.get("analysis_done"):
-                if st.button(" New analysis 🔄"):
-                    st.session_state.analysis_done=False
-                    st.session_state.input_key+=1
-                    st.rerun()
+        st.session_state.is_running=False
+        st.toast("Analysis complete ✅")
+        st.session_state.analysis_done=True
+        st.session_state.history.append(label)
+        st.caption(f"{st.session_state.query_count}/{mqps} analyses used this session.")
+
+        if st.session_state.get("analysis_done"):
+            if st.button(" New analysis 🔄"):
+                st.session_state.analysis_done=False
+                st.session_state.input_key+=1
+                st.rerun()
 with st.expander("Session history"):
     if st.session_state.history:
         for item in st.session_state.history:
@@ -167,7 +175,7 @@ with st.expander("About this tool"):
     st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
 **How 2 Use:**
 - Type a company name or business idea and hit 'Analyze'
-- Quick mode gives you the sharpes single insight per section
+- Quick mode gives you the sharpest single insight per section
 - Full mode goes deeper with multiple angles per section
 - Haiku is faster and less acute. Sonnet is slower but sharper
 
