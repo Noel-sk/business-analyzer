@@ -8,11 +8,11 @@ try:
 except Exception:
     api_key=os.environ.get("ant_api1")
 client=anthropic.Anthropic(api_key=api_key)
-mqps=3
+mqps=2
 
 def ask_claude_stream(prompt, placeholder, mode2):
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Haiku" else "claude-sonnet-4-6", max_tokens=1625, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Surface Level" else "claude-sonnet-4-6", max_tokens=1625, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             first_line_done=False
@@ -84,12 +84,8 @@ Never use special symbols. Write numbers and percentages in plain text"""
 
 
 
-st.set_page_config(page_title="Business Analyzer", layout="centered")
-st.markdown("""<style>.block-container {padding-top: 2rem; padding-bottom: 2rem;}
-h1 {font-size: 1.8rem; font-weight: 700; margin-bottom: 0;}.stRadio label {font-size: 0.85rem;}
-.stTextInput input {border-radius: 8px;}.stButton button {border-radius: 8px; width: 100%;}
-.stExpander {border: none;}</style>""", unsafe_allow_html=True)
 
+st.set_page_config(page_title="Business Analyzer", layout="centered")
 st.title("Business Analyzer 📊 ")
 st.caption("Drop a company or idea, get it analyzed thoroughly")
 st.divider()
@@ -98,6 +94,8 @@ if "query_count" not in st.session_state:
     st.session_state.query_count=0
 if "history" not in st.session_state:
     st.session_state.history=[]
+if "historyd" not in st.session_state:
+    st.session_state.historyd={}
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done=False
 if "is_running" not in st.session_state:
@@ -110,9 +108,9 @@ if "pending_input" not in st.session_state:
 
 col1, col2=st.columns(2)
 with col1:
-    mode=st.radio("Analysis depth: ", ["Quick", "Full"], horizontal=True)
+    mode=st.radio("Analysis Depth: ", ["Quick", "Full"], horizontal=True)
 with col2:
-    mode2=st.radio("Model: ", ["Haiku", "Sonnet"], horizontal=True)
+    mode2=st.radio("Analysis Type: ", ["Surface Level", "In Depth"], horizontal=True)
 user_input=st.text_input("Your input:", key=f"input_{st.session_state.input_key}")
 st.caption(f"{len(user_input)}/100 characters")
 
@@ -137,7 +135,7 @@ else:
         cleaned_input=st.session_state.pending_input
             
         with st.spinner("Recognizing..."):
-            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with one word: [Company: name] or [Idea: 2-4 word label]'}])
+            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=7, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with one word: [Company: name] or [Idea: 2-4 word label]'}])
             first_line=peek.content[0].text.strip()
         if "Company"  not in first_line and "Idea" not in first_line:
             st.warning("Couldn't recognize input type. Try rephrasing.")
@@ -162,6 +160,7 @@ else:
         st.toast("Analysis complete ✅")
         st.session_state.analysis_done=True
         st.session_state.history.append(label)
+        st.session_state.historyd[label]=result
         st.caption(f"{st.session_state.query_count}/{mqps} analyses used this session.")
 
         if st.session_state.get("analysis_done"):
@@ -169,10 +168,13 @@ else:
                 st.session_state.analysis_done=False
                 st.session_state.input_key+=1
                 st.rerun()
+
 with st.expander("Session history"):
     if st.session_state.history:
-        for item in st.session_state.history:
-            st.caption(f" - {item}")
+        selected=st.radio("Past Analyses:", st.session_state.history, key="history_select")
+        if selected and selected in st.session_state.historyd:
+            st.markdown(st.session_state.historyd[selected].split("\n", 1)[1] if "\n" in st.session_state.historyd[selected] else st.session_state.historyd[selected])
+            
     else: st.caption("No analysis yet.")
     
 with st.expander("About this tool"):
