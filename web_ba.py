@@ -25,7 +25,7 @@ def ask_claude_stream(prompt, placeholder, mode2):
                     placeholder.markdown(display_text)
                 else:
                     display_text+=text
-                    placeholder.markdown(display_text)
+                    C(display_text)
             return full_text
     except anthropic.AuthenticationError:
         return "ERROR: API key is missing or invalid."
@@ -33,7 +33,7 @@ def ask_claude_stream(prompt, placeholder, mode2):
         return "ERROR: Rate limit hit. Wait a moment and try again."
     except anthropic.APIConnectionError:
         return "ERROR: Could not connect to Anthropic."
-    except Exception as e:
+    except Exception as  e:
         return f"ERROR: Something went wrong - {str(e)}"
 
 
