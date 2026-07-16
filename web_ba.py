@@ -8,11 +8,11 @@ try:
 except Exception:
     api_key=os.environ.get("ant_api1")
 client=anthropic.Anthropic(api_key=api_key)
-mqps=2
+mqps=3
 
-def ask_claude_stream(prompt, placeholder, mode2):
+def ask_claude_stream(prompt, placeholder, mode2, mode):
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Surface Level" else "claude-sonnet-4-6", max_tokens=1625, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Surface Level" else "claude-sonnet-4-6", max_tokens=625 if mode=="Quick" else 1825, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             first_line_done=False
@@ -25,7 +25,7 @@ def ask_claude_stream(prompt, placeholder, mode2):
                     placeholder.markdown(display_text)
                 else:
                     display_text+=text
-                    C(display_text)
+                    placeholder.markdown(display_text)
             return full_text
     except anthropic.AuthenticationError:
         return "ERROR: API key is missing or invalid."
@@ -38,8 +38,9 @@ def ask_claude_stream(prompt, placeholder, mode2):
 
 
 
-def analyze(user_input, mode):
-    return f"""You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom. Determine if "{user_input}" is an existing company or a business idea, then analyze it
+def analyze(user_input, mode, tone):
+    return f"""You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom. {"If analyzing an idea, lead every section with what is most likely to fail and why, with zero softening. Do not balance negatives with positives" if tone=="Brutal" else ""}
+Analysis MUST be about {user_input} only.
 
 if company, cover each header in order:
 ### Revenue & Misconceptions
@@ -80,14 +81,19 @@ Two specific niches with traction potential and exactly why
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
 Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph
 {"Keep the entire analysis under 465 words. Cover the most critical point per header" if mode=="Quick" else "Write 2-3 paragraphs per header. Each paragraph must add a new angle. Prioritize specificity - name real numbers, real players, real failure patterns - no fillers"}
-Never use special symbols. Write numbers and percentages in plain text"""
+Never use special symbols. Write numbers and percentages in plain text
+
+End with exactly this section:
+### The Move
+One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to watch or investigate. If it's an idea, one thing to validate before going further. 3-sentence-max""" 
 
 
 
 
-st.set_page_config(page_title="Business Analyzer", layout="centered")
+st.set_page_config(page_title="Business Analyzer", layout="wide")
 st.title("Business Analyzer 📊 ")
 st.caption("Drop a company or idea, get it analyzed thoroughly")
+st.markdown("<style>h1 {text-align: center;}</style>", unsafe_allow_html=True)
 st.divider()
 
 if "query_count" not in st.session_state:
@@ -106,11 +112,14 @@ if "pending_input" not in st.session_state:
     st.session_state.pending_input=""
 
 
-col1, col2=st.columns(2)
+col1, col2, col3=st.columns(3)
 with col1:
     mode=st.radio("Analysis Depth: ", ["Quick", "Full"], horizontal=True)
 with col2:
     mode2=st.radio("Analysis Type: ", ["Surface Level", "In Depth"], horizontal=True)
+with col3:
+    tone=st.radio("Tone: ", ["Balanced", "Brutal"], horizontal=True)
+
 user_input=st.text_input("Your input:", key=f"input_{st.session_state.input_key}")
 st.caption(f"{len(user_input)}/100 characters")
 
@@ -135,7 +144,7 @@ else:
         cleaned_input=st.session_state.pending_input
             
         with st.spinner("Recognizing..."):
-            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=7, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with one word: [Company: name] or [Idea: 2-4 word label]'}])
+            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with exactly: [Company: name] or [Idea: 2-4 word label]'}])
             first_line=peek.content[0].text.strip()
         if "Company"  not in first_line and "Idea" not in first_line:
             st.warning("Couldn't recognize input type. Try rephrasing.")
@@ -151,8 +160,9 @@ else:
             st.subheader(f"Idea: {label}")
         st.divider()
         placeholder=st.empty()
+
         with st.spinner("Analyzing..."):
-            result=ask_claude_stream(analyze(cleaned_input, mode), placeholder, mode2)
+            result=ask_claude_stream(analyze(cleaned_input, mode, tone), placeholder, mode2, mode)
         if result and result.startswith("ERROR"):
             placeholder.error(result)
 
@@ -171,8 +181,8 @@ else:
 
 with st.expander("Session history"):
     if st.session_state.history:
-        selected=st.radio("Past Analyses:", st.session_state.history, key="history_select")
-        if selected and selected in st.session_state.historyd:
+        selected=st.radio("Past Analyses:", ["- select 2 view -"] + st.session_state.history, key="history_select")
+        if selected and selected in st.session_state.historyd and selected != "- select 2 view -":
             st.markdown(st.session_state.historyd[selected].split("\n", 1)[1] if "\n" in st.session_state.historyd[selected] else st.session_state.historyd[selected])
             
     else: st.caption("No analysis yet.")
