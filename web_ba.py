@@ -10,7 +10,7 @@ except Exception:
 client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
-def ask_claude_stream(prompt, placeholder, mode2, mode):
+def ask_claude_stream(prompt, placeholder, mode2, mode, attempt=1):
     try:
         with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Surface Level" else "claude-sonnet-4-6", max_tokens=625 if mode=="Quick" else 1825, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
@@ -32,15 +32,18 @@ def ask_claude_stream(prompt, placeholder, mode2, mode):
     except anthropic.RateLimitError:
         return "ERROR: Rate limit hit. Wait a moment and try again."
     except anthropic.APIConnectionError:
-        return "ERROR: Could not connect to Anthropic."
+        return "ERROR: Could not connect."
     except Exception as  e:
+        if attempt==1:
+            return ask_claude_stream(prompt, placeholder, mode2, mode, attempt=2)
         return f"ERROR: Something went wrong - {str(e)}"
 
 
 
-def analyze(user_input, mode, tone):
+def analyze(user_input, mode, tone, input_type=""):
     return f"""You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom. {"If analyzing an idea, lead every section with what is most likely to fail and why, with zero softening. Do not balance negatives with positives" if tone=="Brutal" else ""}
 Analysis MUST be about {user_input} only.
+For each header, tag either '[Stable]', '[Shifting]', '[Volatile]' next to it - based on how fast that factor changes in the real world, no explanation
 
 if company, cover each header in order:
 ### Revenue & Misconceptions
@@ -80,13 +83,15 @@ Two specific niches with traction potential and exactly why
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
 Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph
-{"Keep the entire analysis under 465 words. Cover the most critical point per header" if mode=="Quick" else "Write 2-3 paragraphs per header. Each paragraph must add a new angle. Prioritize specificity - name real numbers, real players, real failure patterns - no fillers"}
+{"Keep analysis under 465 words. Cover the most critical point per header" + ("Focus on hard data: real figures, specific percentages" if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers.") if mode=="Quick" else "Write 2-3 paragraphs per header, each with a new angle"}
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly this section:
 ### The Move
-One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to watch or investigate. If it's an idea, one thing to validate before going further. 3-sentence-max""" 
+One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to watch or investigate. If it's an idea, one thing to validate before going further. 3-sentence-max
 
+### Blind Spot
+State the biggest assumption this analysis relied on and why it could be wrong. 3-sentence-max"""
 
 
 
@@ -137,7 +142,6 @@ else:
         else:
             st.session_state.is_running=True
             st.session_state.pending_input=pending_input
-            st.session_state.query_count+=1
             st.rerun()
 
     if st.session_state.is_running:
@@ -158,13 +162,15 @@ else:
             label=first_line.replace("[Idea:", "").replace("]", "").strip()
             st.success("Recognized as a business idea")
             st.subheader(f"Idea: {label}")
+        st.session_state.query_count+=1
         st.divider()
         placeholder=st.empty()
 
         with st.spinner("Analyzing..."):
-            result=ask_claude_stream(analyze(cleaned_input, mode, tone), placeholder, mode2, mode)
+            result=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode)
         if result and result.startswith("ERROR"):
             placeholder.error(result)
+            st.session_state.query_count-=1
 
         st.session_state.is_running=False
         st.toast("Analysis complete ✅")
@@ -195,4 +201,4 @@ with st.expander("About this tool"):
 - Full mode goes deeper with multiple angles per section
 - Haiku is faster and less acute. Sonnet is slower but sharper
 
-**Limit:** 2 analysis per session, refresh to reset.""")
+**Limit:** 3 analysis per session, refresh to reset.""")
