@@ -1,5 +1,8 @@
 import streamlit as st
 import anthropic
+import threading
+import random
+import time
 import os
 
 
@@ -10,9 +13,10 @@ except Exception:
 client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
-def ask_claude_stream(prompt, placeholder, mode2, mode, attempt=1):
+def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
+    targetw=635 if mode=="Quick" else 1150
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Surface Level" else "claude-sonnet-4-6", max_tokens=625 if mode=="Quick" else 1825, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Surface Level" else "claude-sonnet-4-6", max_tokens=1000 if mode=="Quick" else 2025, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             first_line_done=False
@@ -26,6 +30,10 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, attempt=1):
                 else:
                     display_text+=text
                     placeholder.markdown(display_text)
+                    word_count=len(display_text.split())
+                    percent=min(int((word_count/targetw)*100), 100)
+                    progress_bar.progress(percent)
+                    time.sleep(0.33)
             return full_text
     except anthropic.AuthenticationError:
         return "ERROR: API key is missing or invalid."
@@ -35,7 +43,7 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, attempt=1):
         return "ERROR: Could not connect."
     except Exception as  e:
         if attempt==1:
-            return ask_claude_stream(prompt, placeholder, mode2, mode, attempt=2)
+            return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
         return f"ERROR: Something went wrong - {str(e)}"
 
 
@@ -83,7 +91,7 @@ Two specific niches with traction potential and exactly why
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
 Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph
-{"Keep analysis under 465 words. Cover the most critical point per header" + ("Focus on hard data: real figures, specific percentages" if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers.") if mode=="Quick" else "Write 2-3 paragraphs per header, each with a new angle"}
+{"Keep analysis under 550 words. Cover the most critical point per header. " + ("Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers.") if mode=="Quick" else "Write 2-3 paragraphs per header, each with a new angle"}
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly this section:
@@ -115,6 +123,8 @@ if "input_key" not in st.session_state:
     st.session_state.input_key=0
 if "pending_input" not in st.session_state:
     st.session_state.pending_input=""
+if "sugs" not in st.session_state:
+    st.session_state.sugs="Airbnb"
 
 
 col1, col2, col3=st.columns(3)
@@ -125,11 +135,19 @@ with col2:
 with col3:
     tone=st.radio("Tone: ", ["Balanced", "Brutal"], horizontal=True)
 
-user_input=st.text_input("Your input:", key=f"input_{st.session_state.input_key}")
-st.caption(f"{len(user_input)}/100 characters")
 
+input_col, sugs_col=st.columns([4,1.3])
+with input_col:
+    user_input=st.text_input("Your input:", key=f"input_{st.session_state.input_key}")
+    st.caption(f"{len(user_input)}/100 characters")
+with sugs_col:
+    examples=["AirBNB", "Street Food Cart", "SaaS For Bio-Engineers", "Adidas", "Subscription Meal Kits", "Equinox", "Corporate Meditation Studios"]
+    st.text_input("Suggestions", value=st.session_state.sugs, disabled=True)
+    if st.button("New Idea 🔀"):
+        st.session_state.sugs=random.choice(examples)
+        st.rerun()
 
-
+        
 if st.session_state.query_count>=mqps:
     st.warning(f"You've used all {mqps} analyses this session. Refresh the page to start over.")
 else:
@@ -166,11 +184,27 @@ else:
         st.divider()
         placeholder=st.empty()
 
+        st.markdown("""
+<style>
+div[data-testid="stProgress"] {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 999;
+    background: white;
+    padding: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
         with st.spinner("Analyzing..."):
-            result=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode)
+            progress_bar=st.progress(0)
+            result=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar)
+            progress_bar.empty()
         if result and result.startswith("ERROR"):
             placeholder.error(result)
             st.session_state.query_count-=1
+
 
         st.session_state.is_running=False
         st.toast("Analysis complete ✅")
