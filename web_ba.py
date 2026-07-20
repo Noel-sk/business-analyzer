@@ -59,6 +59,7 @@ def analyze(user_input, mode, tone, input_type=""):
 Analysis MUST be about {user_input} only.
 Maintain one consistent stance throughout - Do not conflict/contradict with previously established statements
 Any claim implying scale or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words
+Somewhere in the analysis, explicitly connect two sections = show how a finding in one section explains or causes something stated in another
 For each header, tag either '[Stable]', '[Shifting]', '[Volatile]' next to it - based on how fast that factor changes in the real world, no explanation
 
 if company, cover each header in order:
@@ -170,7 +171,6 @@ with sugs_col:
             st.rerun()
 
 
-
         
 if st.session_state.query_count>=mqps:
     st.warning(f"You've used all {mqps} analyses this session. Refresh the page to start over.")
@@ -191,9 +191,37 @@ else:
         elif len(pending_input)> 100:
             st.warning("Input too long, please keep under 100 characters.")
         else:
-            st.session_state.is_running=True
-            st.session_state.pending_input=pending_input
-            st.rerun()
+            similar=None
+            for past_l in st.session_state.history:
+                past_w=set(past_l.lower().split())
+                new_w=set(pending_input.lower().split())
+                if past_w & new_w:
+                    similar=past_l
+                    break
+            if similar and "confirm_dup" not in st.session_state:
+                st.session_state.pending_input=pending_input
+                st.session_state.show_dup_warning=True
+                st.rerun()
+            else:
+                st.session_state.is_running=True
+                st.session_state.pending_input=pending_input
+                st.session_state.show_dup_w=False
+                st.rerun()
+
+    if st.session_state.get("show_dup_warning"):
+        st.warning("You may have already analyzed something similar. Check 'Session History below")
+        proceed_col, cancel_col=st.columns(2)
+        with proceed_col:
+            if st.button("Analyze anyway"):
+                st.session_state.confirm_dup=True
+                st.session_state.is_running=True
+                st.session_state.show_dup_warning=False
+                st.rerun()
+        with cancel_col:
+            if st.button("Cancel"):
+                st.session_state.show_dup_warning=False
+                st.rerun()
+
 
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
