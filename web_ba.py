@@ -15,12 +15,13 @@ client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
-    targetw=655 if mode=="Brief" else 1300
+    targetw=785 if mode=="Brief" else 1285
     stime=time.time()
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1100 if mode=="Brief" else 2050, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1200 if mode=="Brief" else 2050, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
+            last_percent=-1
             first_line_done=False
             for text in stream.text_stream:
                 full_text+=text
@@ -34,22 +35,27 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
                     placeholder.markdown(display_text)
                     word_count=len(display_text.split())
                     percent=min(int((word_count/targetw)*100), 100)
-                    progress_bar.progress(percent)
+                    if percent!=last_percent:
+                        progress_bar.progress(percent)
+                        last_percent=percent
                     time.sleep(0.33)
 
             elapsed=round(time.time()-stime, 1)
             final_wc=len(full_text.split())
-
             return full_text, elapsed, final_wc
+
     except anthropic.AuthenticationError:
         return "ERROR: API key is missing or invalid.", 0, 0
     except anthropic.RateLimitError:
-        return "ERROR: Rate limit hit. Wait a moment and try again.", 0, 0
+            if attempt==1:
+                return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
+            return "ERROR: Rate limit hit twice. Wait a moment and try again.", 0, 0
+
     except anthropic.APIConnectionError:
-        return "ERROR: Could not connect.", 0, 0
-    except Exception as  e:
         if attempt==1:
             return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
+        return "ERROR: Could not connect.", 0, 0
+    except Exception as  e:
         return f"ERROR: Something went wrong - {str(e)}", 0, 0
 
 
@@ -73,7 +79,7 @@ Competitive points shaping the company
 Risks that only trial, error and deep invested time in the field can teach
 
 ### Counterintuitive Facts
-Three counterintuitive facts, each directly challenging or complicating something stated in an earlier section above
+Two counterintuitive facts, each directly challenging or complicating something stated in an earlier section above
 
 ### What Analysts Miss
 What only emerges upon closer assessment
@@ -99,17 +105,16 @@ The underlying issue that quietly sinks businesses in this space and how to surv
 Two specific niches with traction potential and exactly why
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
-Use 2-sentence maximum paragraphs. Max 3 paragraphs per header. Don't combine different ideas under same paragraph
-{"Keep analysis under 650 words, but always finish 'The Move' & 'Blind Spot' completely regardless of word limit. Cover the most critical point per header. " + ("Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers.") if mode=="Brief" else "Write 2-3 paragraphs per header, each covering a distinct angle - rotate between financial, competitive, behavioral, and structural angles across paragraphs, never repeat same angle within one header"}
+Each sentence must have a min. of 11 and a max. of 25 words. Never use semicolons, dashes, or colons to stack multiple information into one sentence. Don't combine different ideas under same paragraph
+{"Cover ALL sections while keeping full analysis UNDER 800 words. Use 2 paragraphs per header, each paragraph with  max. 2 sentences. Cover the most critical point per header. " + ("Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers.") if mode=="Brief" else "Cover ALL sections while keeping it UNDER 1300 words. Use 2-3 paragraphs per header, with max. 3 sentences per paragraph. Each covering a distinct angle - rotate between financial, competitive, behavioral, and structural angles across paragraphs, never repeat same angle"}
 Never use special symbols. Write numbers and percentages in plain text
 
-End with exactly this section:
-### Blind Spot
-{"Call out directly where this analysis was overconfident or too certain, and why that confidence isn't fully earned" if tone=="Brutal" else "State one assumption THIS analysis made that could be wrong - not a market risk, but a flaw in the reasoning above"} 3-sentence-max
+End with exactly these sections:
+### Weak Point
+{"Call out directly where this analysis was overconfident or too certain, and why that confidence isn't fully earned. 3-sentence-max" if tone=="Brutal" else "State one assumption THIS analysis made that could be wrong, and what would be needed to fill its gap. 2-sentence-max - not a market risk, but a flaw in the reasoning above"} 3-sentence-max
 
 ### The Move
 One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to watch or investigate. If it's an idea, one thing to validate before going further. 4-sentence-max"""
-
 
 
 st.set_page_config(page_title="Business Analyzer", layout="wide")
@@ -117,6 +122,7 @@ st.title("Business Analyzer 📊 ")
 st.markdown("<p style='text-align: center; color: gray; font-size: 0.9em;'>Drop a company or idea, get it analyzed thoroughly</p>", unsafe_allow_html=True)
 st.markdown("<style>h1 {text-align: center;}</style>", unsafe_allow_html=True)
 st.divider()
+
 
 if "query_count" not in st.session_state:
     st.session_state.query_count=0
@@ -133,13 +139,16 @@ if "input_key" not in st.session_state:
 if "pending_input" not in st.session_state:
     st.session_state.pending_input=""
 if "sugs" not in st.session_state:
-    st.session_state.sugs="AirBNB"
+    st.session_state.sugs="Airbnb"
 if "psugs" not in st.session_state:
     st.session_state.psugs=None
+if "cache" not in st.session_state:
+    st.session_state.cache={}
     
 if st.session_state.psugs:
     st.session_state[f"input_{st.session_state.input_key}"]=st.session_state.psugs
     st.session_state.psugs=None
+
 
 
 col1, col2, col3=st.columns(3)
@@ -151,14 +160,43 @@ with col3:
     tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True)
 
 
+
+def handle_analyze():
+    pending_input=st.session_state[f"input_{st.session_state.input_key}"].strip()
+    if not pending_input:
+        st.session_state.pending_warning="Please enter something."
+    elif len(pending_input)>100:
+             st.session_state.pending_warning="Input 2 long, please keep under 100 characters."
+    else:
+        st.session_state.pending_warning=None
+        similar=None
+        for past_l in st.session_state.history:
+            past_w=set(past_l.lower().split())
+            new_w=set(pending_input.lower().strip())
+            if past_w & new_w:
+                similar=past_l
+                break
+
+        cache_key=f"{pending_input.lower()} | {mode} | {mode2} | {tone}"
+        if cache_key in st.session_state.cache:
+            st.session_state.cached_hit=cache_key
+        elif similar and "confirm_dup" not in st.session_state:
+            st.session_state.pending_input=pending_input
+            st.session_state.show_dup_warning=True
+        else:
+            st.session_state.is_running=True
+            st.session_state.pending_input=pending_input
+            st.session_state.show_dup_warning=False
+
+
+
 input_col, sugs_col=st.columns([4,1.3])
 with input_col:
-    user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}")
+    user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze)
     st.caption(f"{len(user_input)}/100 characters")
-
-
+    
 with sugs_col:
-    examples=["AirBNB", "Street Food Cart", "SaaS For Bio-Engineers", "Adidas", "Subscription Meal Kits", "Equinox", "Corporate Meditation Studios"]
+    examples=["Airbnb", "Street Food Cart", "SaaS For Bio-Engineers", "Adidas", "Subscription Meal Kits", "Equinox", "Corporate Meditation Studios"]
     st.text_input("Inspiration Panel", value=st.session_state.sugs, disabled=True)
     use_col, new_col=st.columns(2)
     with use_col:
@@ -166,7 +204,7 @@ with sugs_col:
             st.session_state.psugs=st.session_state.sugs
             st.rerun()
     with new_col:
-        if st.button("New 🔀"):
+        if st.button("🔀"):
             st.session_state.sugs=random.choice(examples)
             st.rerun()
 
@@ -183,52 +221,51 @@ if st.session_state.query_count>=mqps:
         else:
             move_section="No move identified."
         st.markdown(f"**{past_l}** - {move_section}")
+        
 else:
-    if st.button("Analyze", disabled=st.session_state.is_running):
-        pending_input=user_input.strip()
-        if not pending_input: 
-            st.warning("Please enter something.")
-        elif len(pending_input)> 100:
-            st.warning("Input too long, please keep under 100 characters.")
-        else:
-            similar=None
-            for past_l in st.session_state.history:
-                past_w=set(past_l.lower().split())
-                new_w=set(pending_input.lower().split())
-                if past_w & new_w:
-                    similar=past_l
-                    break
-            if similar and "confirm_dup" not in st.session_state:
-                st.session_state.pending_input=pending_input
-                st.session_state.show_dup_warning=True
-                st.rerun()
-            else:
-                st.session_state.is_running=True
-                st.session_state.pending_input=pending_input
-                st.session_state.show_dup_w=False
-                st.rerun()
+    if st.button("Analyze", disabled=st.session_state.is_running, on_click=handle_analyze):
+       pass
+    if st.session_state.get("pending_warning"):
+        st.warning(st.session_state.pending_warning)
+        st.session_state.pending_warning=None
 
+        
     if st.session_state.get("show_dup_warning"):
-        st.warning("You may have already analyzed something similar. Check 'Session History below")
+        st.warning("You may have already analyzed something similar. Check 'Session History' below")
+
+
         proceed_col, cancel_col=st.columns(2)
         with proceed_col:
             if st.button("Analyze anyway"):
-                st.session_state.confirm_dup=True
                 st.session_state.is_running=True
                 st.session_state.show_dup_warning=False
+                st.session_state.pending_input=user_input.strip()
                 st.rerun()
         with cancel_col:
             if st.button("Cancel"):
                 st.session_state.show_dup_warning=False
                 st.rerun()
 
+    if st.session_state.get("cached_hit"):
+        key=st.session_state.cached_hit
+        cached_result, cached_elapsed, cached_wc, cached_label=st.session_state.cache[key]
+        st.info("Instant ⚡ - cached result")
+        st.subheader(cached_label)
+        st.divider()
+        card=st.container(border=True)
+        with card:
+            st.markdown(cached_result.split("\n", 1)[1] if "\n" in cached_result else cached_result)
+        st.caption(f"Words: {cached_wc} | Time: {cached_elapsed}s")
+        if st.button("Clear"):
+            st.session_state.cached_hit=None
+            st.rerun()
 
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
 
         
         with st.spinner("Recognizing..."):
-            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a real existing company or a business idea? Reply with exactly: [Company: name] or [Idea: 2-4 word label]'}])
+            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'"{cleaned_input}": company or a business idea? Reply exactly: [Company: name] or [Idea: 2-5 word label]'}])
             first_line=peek.content[0].text.strip()
         if "Company"  not in first_line and "Idea" not in first_line:
             st.warning("Couldn't recognize input type. Try rephrasing.")
@@ -278,10 +315,13 @@ div[data-testid="stProgress"] {
         st.session_state.analysis_done=True
         st.session_state.history.append(label)
         st.session_state.historyd[label]=result
-        st.caption(f"{st.session_state.query_count}/{mqps} analyses used this session.")
         if result and not result.startswith("ERROR"):
-            model_used="Sonnet" if mode2=="Detailed" else "Haiku"
-            st.caption(f"Model: {model_used}  |  Words: {final_wc}  |  Time: {elapsed}s")
+            cache_key=f"{cleaned_input.lower()} | {mode} | {mode2} | {tone}"
+            full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
+            st.session_state.cache[cache_key]=(result, elapsed, final_wc, full_label)
+        st.caption(f"{st.session_state.query_count}/{mqps} analyses used this session.")
+        model_used="Sonnet" if mode2=="Detailed" else "Haiku"
+        st.caption(f"Words: {final_wc}  |  Time: {elapsed}s | Model: {model_used}")
 
         if result and not result.startswith("ERROR"):
             clean_text=re.sub(r"###\s*", "", result)
@@ -292,6 +332,7 @@ div[data-testid="stProgress"] {
 document.getElementById('copybtn').innerText='Copied ✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='Copy 📋';}}, 2500);"
 style="padding:8px 16px; border-radius:6px; cursor:pointer;"> Copy 📋</button>""", height=50)
             
+
 
         if st.session_state.get("analysis_done"):
             if st.button(" New analysis 🔄"):
@@ -304,7 +345,6 @@ with st.expander("Session history"):
         selected=st.radio("Past Analyses:", ["- select 2 view -"] + st.session_state.history, key="history_select")
         if selected and selected in st.session_state.historyd and selected != "- select 2 view -":
             st.markdown(st.session_state.historyd[selected].split("\n", 1)[1] if "\n" in st.session_state.historyd[selected] else st.session_state.historyd[selected])
-            
     else: st.caption("No analysis yet.")
     
 with st.expander("About this tool"):
