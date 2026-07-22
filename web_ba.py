@@ -15,7 +15,7 @@ client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
-    targetw=785 if mode=="Brief" else 1285
+    targetw=785 if mode=="Brief" else 1305
     stime=time.time()
     try:
         with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1200 if mode=="Brief" else 2050, messages=[{"role": "user", "content": prompt}]) as stream:
@@ -25,14 +25,15 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
             first_line_done=False
             for text in stream.text_stream:
                 full_text+=text
+
                 if not first_line_done:
                     if "\n" in full_text:
                         first_line_done=True
                         display_text=full_text.split("\n", 1)[1]
-                    placeholder.markdown(display_text)
+                    placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
                 else:
                     display_text+=text
-                    placeholder.markdown(display_text)
+                    placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
                     word_count=len(display_text.split())
                     percent=min(int((word_count/targetw)*100), 100)
                     if percent!=last_percent:
@@ -66,7 +67,8 @@ Analysis MUST be about {user_input} only.
 Maintain one consistent stance throughout - Do not conflict/contradict with previously established statements
 Any claim implying scale or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words
 Somewhere in the analysis, explicitly connect two sections = show how a finding in one section explains or causes something stated in another
-For each header, tag either '[Stable]', '[Shifting]', '[Volatile]' next to it - based on how fast that factor changes in the real world, no explanation
+Immediately after each header's text, on the exact same line, append either: '[Stable]', '[Shifting]', or '[Volatile]' - based on how fast that factor changes in the real world. no explanation
+
 
 if company, cover each header in order:
 ### Revenue & Misconceptions
@@ -96,7 +98,7 @@ Name specific competitors, their key weaknesses, and whether genuine room exists
 Concrete cashflow path from zero to first dollar(be realistic and average), then to sustainability. No vague frameworks
 
 ### Counterintuitive Insights
-Three concealed facts entrants miss, each directly challenging or complicating something stated in an earlier section above
+Two concealed facts entrants miss, each directly challenging or complicating something stated in an earlier section above
 
 ### Underlying Threat
 The underlying issue that quietly sinks businesses in this space and how to survive it
@@ -105,8 +107,8 @@ The underlying issue that quietly sinks businesses in this space and how to surv
 Two specific niches with traction potential and exactly why
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
-Each sentence must have a min. of 11 and a max. of 25 words. Never use semicolons, dashes, or colons to stack multiple information into one sentence. Don't combine different ideas under same paragraph
-{"Cover ALL sections while keeping full analysis UNDER 800 words. Use 2 paragraphs per header, each paragraph with  max. 2 sentences. Cover the most critical point per header. " + ("Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers.") if mode=="Brief" else "Cover ALL sections while keeping it UNDER 1300 words. Use 2-3 paragraphs per header, with max. 3 sentences per paragraph. Each covering a distinct angle - rotate between financial, competitive, behavioral, and structural angles across paragraphs, never repeat same angle"}
+Each sentence must have a min. of 11 and a max. of 25 words, not more. Don't combine different ideas under same paragraph
+{"Cover ALL headers while keeping analysis around 700-850 words max. Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain NO MORE than 2 sentences. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers while keeping analysis around 1180-1325 words max. Use exactly 2 to 3 paragraphs per header, separated by a blank line. Each paragraph MUST contain around 3 to 5 sentences. Vary angle per paragraph - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly these sections:
@@ -121,6 +123,8 @@ st.set_page_config(page_title="Business Analyzer", layout="wide")
 st.title("Business Analyzer 📊 ")
 st.markdown("<p style='text-align: center; color: gray; font-size: 0.9em;'>Drop a company or idea, get it analyzed thoroughly</p>", unsafe_allow_html=True)
 st.markdown("<style>h1 {text-align: center;}</style>", unsafe_allow_html=True)
+st.markdown("""<style>div[data-testid="stButton"] button { transition: transform 0.15s ease, box-shadow 0.15s ease;}
+div[data-testid="stButton"] button:hover {transform: scale(1.15); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}</style>""", unsafe_allow_html=True)
 st.divider()
 
 
@@ -153,11 +157,11 @@ if st.session_state.psugs:
 
 col1, col2, col3=st.columns(3)
 with col1:
-    mode=st.radio("Structure", ["Brief", "Extensive"], horizontal=True)
+    mode=st.radio("Structure", ["Brief", "Extensive"], horizontal=True, help="**Brief**: short & focused. **Extensive**: longer, multi-angle breakdown.")
 with col2:
-    mode2=st.radio("Configuration", ["Simplified", "Detailed"], horizontal=True)
+    mode2=st.radio("Configuration", ["Simplified", "Detailed"], horizontal=True, help="**Simplified** uses 'Haiku' (faster, lighter). **Detailed** uses 'Sonnet' (slower, sharper reasoning).")
 with col3:
-    tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True)
+    tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.")
 
 
 
@@ -172,7 +176,7 @@ def handle_analyze():
         similar=None
         for past_l in st.session_state.history:
             past_w=set(past_l.lower().split())
-            new_w=set(pending_input.lower().strip())
+            new_w=set(pending_input.lower().split())
             if past_w & new_w:
                 similar=past_l
                 break
@@ -190,13 +194,14 @@ def handle_analyze():
 
 
 
+
 input_col, sugs_col=st.columns([4,1.3])
 with input_col:
     user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze)
     st.caption(f"{len(user_input)}/100 characters")
     
 with sugs_col:
-    examples=["Airbnb", "Street Food Cart", "SaaS For Bio-Engineers", "Adidas", "Subscription Meal Kits", "Equinox", "Corporate Meditation Studios"]
+    examples=["Airbnb", "AI-automated Air Traffic Controller System", "SaaS For Bio-Engineers", "Adidas", "Subscription Meal Kits", "Equinox", "Corporate Meditation Studios"]
     st.text_input("Inspiration Panel", value=st.session_state.sugs, disabled=True)
     use_col, new_col=st.columns(2)
     with use_col:
@@ -220,16 +225,13 @@ if st.session_state.query_count>=mqps:
             move_section=move_section.split("###")[0].strip()
         else:
             move_section="No move identified."
-        st.markdown(f"**{past_l}** - {move_section}")
-        
+        st.markdown(f"**{past_l}** - {move_section}")    
 else:
     if st.button("Analyze", disabled=st.session_state.is_running, on_click=handle_analyze):
        pass
     if st.session_state.get("pending_warning"):
         st.warning(st.session_state.pending_warning)
-        st.session_state.pending_warning=None
-
-        
+        st.session_state.pending_warning=None 
     if st.session_state.get("show_dup_warning"):
         st.warning("You may have already analyzed something similar. Check 'Session History' below")
 
@@ -246,6 +248,7 @@ else:
                 st.session_state.show_dup_warning=False
                 st.rerun()
 
+
     if st.session_state.get("cached_hit"):
         key=st.session_state.cached_hit
         cached_result, cached_elapsed, cached_wc, cached_label=st.session_state.cache[key]
@@ -259,7 +262,6 @@ else:
         if st.button("Clear"):
             st.session_state.cached_hit=None
             st.rerun()
-
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
 
@@ -283,22 +285,13 @@ else:
 
         st.session_state.query_count+=1
         st.divider()
-        card=st.container(border=True)
-        with card:
-            placeholder=st.empty()
-        st.markdown("""
-<style>
-div[data-testid="stProgress"] {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    z-index: 999;
-    background: white;
-    padding: 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+        st.markdown("""<style>div[data-testid="stProgress"] {position: fixed;
+bottom: 0; left: 0; width: 100%; z-index: 999; background: white; padding: 10px;}
+div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse 1.7s ease-in-out infinite;}
+@keyframes barPulse{0%{opacity:1;}50%{opacity:0.6;}100%{opacity:1;}}
+#analysis-card {border: 3px solid orange; border-radius:10px; padding: 20px; transition: border-color 3.5s; animation: fadeIn 1.0s ease-in;}
+@keyframes fadeIn {from {opacity: 0;} to {opacity: 1;}} </style>""", unsafe_allow_html=True)
+        placeholder=st.empty()
 
         
         with st.spinner("Analyzing..."):
@@ -306,15 +299,20 @@ div[data-testid="stProgress"] {
             result, elapsed, final_wc=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar)
             progress_bar.empty()
 
+
         if result and result.startswith("ERROR"):
             placeholder.error(result)
             st.session_state.query_count-=1
+        else:
+            anim_id=f"anim-{time.time()}"
+            st.markdown(f"""<style id="{anim_id}"> #analysis-card {{border-color: #2ecc71 !important;}}</style>""", unsafe_allow_html=True)
 
         st.session_state.is_running=False
         st.toast("Analysis complete ✅")
         st.session_state.analysis_done=True
         st.session_state.history.append(label)
         st.session_state.historyd[label]=result
+
         if result and not result.startswith("ERROR"):
             cache_key=f"{cleaned_input.lower()} | {mode} | {mode2} | {tone}"
             full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
