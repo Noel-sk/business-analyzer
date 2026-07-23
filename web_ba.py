@@ -15,10 +15,10 @@ client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
-    targetw=785 if mode=="Brief" else 1305
+    targetw=825 if mode=="Brief" else 1450
     stime=time.time()
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1200 if mode=="Brief" else 2050, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1200 if mode=="Brief" else 2100, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             last_percent=-1
@@ -107,8 +107,8 @@ The underlying issue that quietly sinks businesses in this space and how to surv
 Two specific niches with traction potential and exactly why
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
-Each sentence must have a min. of 11 and a max. of 25 words, not more. Don't combine different ideas under same paragraph
-{"Cover ALL headers while keeping analysis around 700-850 words max. Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain NO MORE than 2 sentences. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers while keeping analysis around 1180-1325 words max. Use exactly 2 to 3 paragraphs per header, separated by a blank line. Each paragraph MUST contain around 3 to 5 sentences. Vary angle per paragraph - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
+Each sentence must have a min. of 11 and a max. of 25 words, NEVER MORE. Don't combine different ideas under same paragraph
+{"Cover ALL headers while keeping analysis around 780-850 words max. Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain NO MORE than 2 sentences. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers while keeping analysis at least 1180 words, with a maximum of 1380 words. Use exactly 3 to 4 paragraphs per '###header', separated by a blank line. Each paragraph MUST contain at least 4 sentences. Vary angle per paragraph - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly these sections:
@@ -209,7 +209,7 @@ with sugs_col:
             st.session_state.psugs=st.session_state.sugs
             st.rerun()
     with new_col:
-        if st.button("🔀"):
+        if st.button("New"):
             st.session_state.sugs=random.choice(examples)
             st.rerun()
 
@@ -236,6 +236,7 @@ else:
         st.warning("You may have already analyzed something similar. Check 'Session History' below")
 
 
+
         proceed_col, cancel_col=st.columns(2)
         with proceed_col:
             if st.button("Analyze anyway"):
@@ -249,10 +250,11 @@ else:
                 st.rerun()
 
 
+
     if st.session_state.get("cached_hit"):
         key=st.session_state.cached_hit
         cached_result, cached_elapsed, cached_wc, cached_label=st.session_state.cache[key]
-        st.info("Instant ⚡ - cached result")
+        st.info("Instant⚡")
         st.subheader(cached_label)
         st.divider()
         card=st.container(border=True)
@@ -265,6 +267,7 @@ else:
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
 
+
         
         with st.spinner("Recognizing..."):
             peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'"{cleaned_input}": company or a business idea? Reply exactly: [Company: name] or [Idea: 2-5 word label]'}])
@@ -273,14 +276,16 @@ else:
             st.warning("Couldn't recognize input type. Try rephrasing.")
             st.session_state.is_running=False
             st.stop()
+        st.markdown("""<style>@keyframes recognizeFade{from{opacity: 0;} to {opacity: 1;}} #recognize-msg{animation:recognizeFade 1.9s ease-in;}</style>""", unsafe_allow_html=True)
         if "Company" in first_line:                                                                                          
             label=first_line.replace("[Company:", "").replace("]", "").strip()
-            st.success("Recognized as an existing company")
-            st.subheader(f"Company: {label}")
+            bannert="Company"
+            bannerc="#3498db"
         else:
             label=first_line.replace("[Idea:", "").replace("]", "").strip()
-            st.success("Recognized as a business idea")
-            st.subheader(f"Idea: {label}")
+            bannert="Idea"
+            bannerc="#9b59b6"
+        st.markdown(f'<div id="recognize-msg" style="background-color:{bannerc}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{bannert}: {label}</div>', unsafe_allow_html=True)
 
 
         st.session_state.query_count+=1
@@ -289,11 +294,12 @@ else:
 bottom: 0; left: 0; width: 100%; z-index: 999; background: white; padding: 10px;}
 div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse 1.7s ease-in-out infinite;}
 @keyframes barPulse{0%{opacity:1;}50%{opacity:0.6;}100%{opacity:1;}}
+
 #analysis-card {border: 3px solid orange; border-radius:10px; padding: 20px; transition: border-color 3.5s; animation: fadeIn 1.0s ease-in;}
 @keyframes fadeIn {from {opacity: 0;} to {opacity: 1;}} </style>""", unsafe_allow_html=True)
-        placeholder=st.empty()
 
-        
+
+        placeholder=st.empty()
         with st.spinner("Analyzing..."):
             progress_bar=st.progress(0)
             result, elapsed, final_wc=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar)
@@ -306,7 +312,15 @@ div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse
         else:
             anim_id=f"anim-{time.time()}"
             st.markdown(f"""<style id="{anim_id}"> #analysis-card {{border-color: #2ecc71 !important;}}</style>""", unsafe_allow_html=True)
+            display_final=result.split("\n", 1)[1] if "\n" in result else result
 
+            highlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', r'<span style="background-color:#3a7ca5; padding:1px 4px; border-radius:3px;">\1</span>', display_final)
+            highlighted=highlighted.replace("[Stable]", '<span style="color:#2ecc71;">[Stable]</span>')
+            highlighted=highlighted.replace("[Shifting]", '<span style="color:#f39c12;">[Shifting]</span>')
+            highlighted=highlighted.replace("[Volatile]", '<span style="color:#e74c3c;">[Volatile]</span>')
+            placeholder.markdown(f'<div id="analysis-card">\n{highlighted}\n</div>', unsafe_allow_html=True)
+
+            
         st.session_state.is_running=False
         st.toast("Analysis complete ✅")
         st.session_state.analysis_done=True
@@ -327,8 +341,8 @@ div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse
             clean_text=clean_text.strip()
             st.components.v1.html(f"""<textarea id="copytext" style="display:none;">{clean_text}</textarea>
 <button id="copybtn" onclick="navigator.clipboard.writeText(document.getElementById('copytext').value);
-document.getElementById('copybtn').innerText='Copied ✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='Copy 📋';}}, 2500);"
-style="padding:8px 16px; border-radius:6px; cursor:pointer;"> Copy 📋</button>""", height=50)
+document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='📋';}}, 2300);"
+style="padding:8px 16px; border-radius:6px; cursor:pointer;">📋</button>""", height=50)
             
 
 
@@ -343,8 +357,9 @@ with st.expander("Session history"):
         selected=st.radio("Past Analyses:", ["- select 2 view -"] + st.session_state.history, key="history_select")
         if selected and selected in st.session_state.historyd and selected != "- select 2 view -":
             st.markdown(st.session_state.historyd[selected].split("\n", 1)[1] if "\n" in st.session_state.historyd[selected] else st.session_state.historyd[selected])
-    else: st.caption("No analysis yet.")
-    
+    else:
+        st.caption("No analysis yet.")
+
 with st.expander("About this tool"):
     st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
 **How 2 Use:**
