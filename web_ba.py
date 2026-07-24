@@ -7,7 +7,7 @@ import os
 import re
 
 
-try:
+try:   
     api_key=st.secrets["ant_api1"]
 except Exception:
     api_key=os.environ.get("ant_api1")
@@ -15,10 +15,10 @@ client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
-    targetw=825 if mode=="Brief" else 1450
+    targetw=1000 if mode=="Brief" else 1925
     stime=time.time()
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1200 if mode=="Brief" else 2100, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1550 if mode=="Brief" else 3250, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             last_percent=-1
@@ -61,62 +61,92 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
 
 
 
+def render_analysis_card(rlabel, rresult, banner_type, banner_color, qcount, wc, elapsed_time, model_used, show_notes=True):
+    st.markdown(f'<div id="recognize-msg" style="background-color:{banner_color}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{banner_type}: {rlabel}</div>', unsafe_allow_html=True)
+    st.divider()
+    rdisplay=rresult.split("\n", 1)[1] if "\n" in rresult else rresult
+    rhighlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', r'<span style="background-color:#7e6957; padding:1px 4px; border-radius:3px;">\1</span>', rdisplay)
+    rhighlighted=rhighlighted.replace("[Stable]", '<span style="color:#2ecc71;">[Stable]</span>')
+    rhighlighted=rhighlighted.replace("[Shifting]", '<span style="color:#f39c12;">[Shifting]</span>')
+    rhighlighted=rhighlighted.replace("[Volatile]", '<span style="color:#e74c3c;">[Volatile]</span>')
+    st.markdown(f'<div id="analysis-card">\n{rhighlighted}\n</div>', unsafe_allow_html=True)
+    if show_notes:
+        st.session_state.notes[rlabel]=st.text_area("Analysis Notes", value=st.session_state.notes.get(rlabel, ""), key=f"note_{rlabel}", placeholder="Jot down your reaction")
+    st.caption(f"{qcount}/{mqps} analyses used this session.")
+    st.caption(f"Words: {wc}  |  Time: {elapsed_time}s | Model: {model_used}")
+    rclean=re.sub(r"###\s*", "", rresult)
+    rclean=re.sub(r"\[.*?\]", "", rclean).strip()
+    st.components.v1.html(f"""<textarea id="copytext" style="display:none;">{rclean}</textarea>
+<button id="copybtn" onclick="navigator.clipboard.writeText(document.getElementById('copytext').value);
+document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='📋';}}, 2300);"
+style="padding:8px 16px; border-radius:6px; cursor:pointer;">📋</button>""", height=50)
+
+    
+
 def analyze(user_input, mode, tone, input_type=""):
     return f"""You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom. {"If analyzing an idea, lead every section with what is most likely to fail and why, with zero softening. Do not balance negatives with positives" if tone=="Brutal" else ""}
-Analysis MUST be about {user_input} only.
+Analysis MUST be about {user_input} only. Don't necessarily go over the examples stated below, they are examples to give you an idea
 Maintain one consistent stance throughout - Do not conflict/contradict with previously established statements
-Any claim implying scale or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words
-Somewhere in the analysis, explicitly connect two sections = show how a finding in one section explains or causes something stated in another
+Any claim implying scale or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words. For each major data claim, briefly note its basis in parentheses: (public data), (industry estimate), or (inference) - so it's clear how much to trust each figure
+During the analysis, explicitly connect two sections = show how a finding in one section explains or causes something stated in another
 Immediately after each header's text, on the exact same line, append either: '[Stable]', '[Shifting]', or '[Volatile]' - based on how fast that factor changes in the real world. no explanation
 
 
 if company, cover each header in order:
-### Revenue & Misconceptions
-Revenue breakdown with real numbers. Key misconceptions about this company's revenue model
+### Revenue Structure
+{"Break revenue into its actual parts - which products/segments/services generate it, and what share each holds. Then clarify which is actually profitable versus which exists to support the rest even if it loses money or breaks even" if mode=="Extensive" and mode2=="Detailed" else "Revenue breakdown with real numbers where possible. Key misconception about this company's revenue model"}
 
 ### Competitive Eye
-Competitive points shaping the company
+{"Identify 1 or 2 things this company does that a competitor cannot easily copy, name the ACTUAL mechanism. If none, say so directly, that's a real finding. Flag competitors who look dangerous but aren't(well-funded but structurally can't compete)" if mode=="Extensive" and mode2=="Detailed" else "Competitive points shaping the company. Name real competitors and one insight that gives them a competitive edge over their main competitor"}
 
 ### Out Of Sight Risks
-Risks that only trial, error and deep invested time in the field can teach
+{"Identify risks that wouldn't even show up in analysts research. The kind that you ONLY learn by having operated in this field, making the mistakes or managed the day-to-day relationships involved. Be specific. (e.g., dependency on a supplier or partner that isn't visible from the outside)(points-of-failure type risks)" if mode=="Extensive" and mode2=="Detailed" else "Risks that only trial, error and prolonged time investment teach(points-of-failure type risks)(include critical things to avoid)"}
 
 ### Counterintuitive Facts
-Two counterintuitive facts, each directly challenging or complicating something stated in an earlier section above
+{"Identify 2 facts for how this company makes money or stays competitive is wrong, and the real mechanism is something else entirely(what is true right now, not past). Each in different areas" if mode=="Extensive" and mode2=="Detailed" else "2 facts about this company that go against what a reasonably informed outsider would assume"}
 
 ### What Analysts Miss
-What only emerges upon closer assessment
+{"Identify a specific mechanism that gives the company an advantage in how they operate, a capablity being built that hasn't shown up in revenue yet or an advantage that's underweighted" if mode=="Extensive" and mode2=="Detailed" else "Identify one strength that only becomes visible upon closer assessment(e.g., switching cost a customer would have to eat)"}
 
+### Insight-Seeking Questions
+One to two sharp, specific questions this analysis surfaces that only someone with real domain insider knowledge could answer - not generic questions, ones pointing directly at what's genuinely uncertain here and its answer can change this analysis' direction
 
 If business idea, cover each header in order:
 ### Market Demand
-Evaluate market demand extensively with real numbers. Is demand genuine or manufactured?
+{"State the type of consumers who specifically have this problem bad enough to pay to solve it, make it a narrow group for whom this is an active current pain point. Say how they solve this problem today without this idea, if they can't, say so. If the idea is an extra rather than solving something(e.g., robot waiters), look for a group who could use this to make things more efficient, lower costs, etc." if mode=="Extensive" and mode2=="Detailed" else "Evaluate market demand extensively with real numbers. Is demand genuine, manufactured or hyped? Explain why"}
 
 ### Competition
-Name specific competitors, their key weaknesses, and whether genuine room exists
+{"Identify who is currently already solving or trying to make a solution for this problem/adjacent version of it - direct competitors, indirect substitutes or default non-solution. For each, state specifically what they're missing or what could be done better based on customer thoughts" if mode=="Extensive" and mode2=="Detailed" else "Name specific competitors, their key weaknesses and what we can do about them, and whether genuine room exists"}
 
 ### Monetization
-Concrete cashflow path from zero to first dollar(be realistic and average), then to sustainability. No vague frameworks
+{"State the specific mechanism this idea would use to collect money, and whether it matches how the target customer already spends money in this category. A model that fights customer's existing spending habits(e.g., asking for upfront payment when category is used to free-with-ads) is a common failure point and should be flagged if it applies" if mode=="Extensive" and mode2=="Detailed" else "Concrete cashflow path from zero to first dollar given how the world is today, competition, potential risks, and future landscape(be realistic), then to long-term sustainability and growth potential. No vague frameworks"}
 
 ### Counterintuitive Insights
-Two concealed facts entrants miss, each directly challenging or complicating something stated in an earlier section above
+{"Identify 1 or 2 assumptions this idea is quietly relying on. The kind of belief that, if wrong, doesn't just hurt the business, it invalidates the whole premise. State it plainly, then argue the case that's false or shakier than it looks using comparable ideas/products where that assumption failed" if mode=="Extensive" and mode2=="Detailed" else "Two concealed facts entrants repeatedly miss, each directly challenging something stated above that would be hard to believe. Confirmed facts ONLY"}
 
 ### Underlying Threat
-The underlying issue that quietly sinks businesses in this space and how to survive it
+{"Identify the recurring failure pattern specific to this category, not generic startup risks(e.g., running out of money, bad hires), but a specific thing that has sunk multiple businesses in this exact space, repeatedly, often ones that look healthy right up until it hit" if mode=="Extensive" and mode2=="Detailed" else "The underlying issue that repeatedly and quietly sinks businesses in this space. Why it happens, how to try to avoid, and how to survive if it happens"}
 
 ### The Angle That Works
-Two specific niches with traction potential and exactly why
+{"Identify two specific, narrow segments within this idea's broader space where the idea has real traction potential. For each, state exactly why and a brief execution plan to start" if mode=="Extensive" and mode2=="Detailed" else "Two specific niches with traction potential and exactly why"}
+
+### Insight-Seeking Questions
+One to two sharp, specific questions this analysis surfaces that only someone with real domain insider knowledge could answer - not generic questions, ones pointing directly at what's genuinely uncertain here and its answer can change this analysis' direction
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
 Each sentence must have a min. of 11 and a max. of 25 words, NEVER MORE. Don't combine different ideas under same paragraph
-{"Cover ALL headers while keeping analysis around 780-850 words max. Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain NO MORE than 2 sentences. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers while keeping analysis at least 1180 words, with a maximum of 1380 words. Use exactly 3 to 4 paragraphs per '###header', separated by a blank line. Each paragraph MUST contain at least 4 sentences. Vary angle per paragraph - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
+{"Cover ALL headers while keeping analysis under 1300 words max. Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain NO MORE than 3 sentences. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers with full depth. Depth and corectness matter more than length so write as much as GENUINELY NEEDED. Use exactly 3 to 4 paragraphs per '###header', separated by a blank line. Each paragraph can NOT contain more than 8 sentences. Vary angle per paragraph where natural - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly these sections:
+### Vital Metrics
+List the 4 to 5 most load-bearing numbers from this entire analysis in one place - the ones that, if wrong, would change the conclusion. Format each as its own numbered line, structured as: **[where it came from]** - the number and why it matters, written as one full sentence, not a fragment. Pull from what's already stated above, nothing new
+
 ### Weak Point
-{"Call out directly where this analysis was overconfident or too certain, and why that confidence isn't fully earned. 3-sentence-max" if tone=="Brutal" else "State one assumption THIS analysis made that could be wrong, and what would be needed to fill its gap. 2-sentence-max - not a market risk, but a flaw in the reasoning above"} 3-sentence-max
+{"Identify 1 critical assumption this analysis is quietly relying on. The kind that, if wrong or suddenly changes, it ivalidates the whole point. Also state where this analysis was most confident based on actual facts" if tone=="Brutal" else "Call out directly where this analysis was overconfident or too certain, and why that confidence isn't fully earned. 3-sentence-max"}
 
 ### The Move
-One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to watch or investigate. If it's an idea, one thing to validate before going further. 4-sentence-max"""
+{"State one specific action that can be started and produce real signal within 30 days - not a milestone in a long-term plan, but a small, cheap test that would tell you whether this idea is worth pursuing further or should be set aside for good. If it can't be reached within 30 days(e.g., due to licensing or funding), state so directly and what can be done instead to still get a sense of its potential. State exactly what result from that action would give a clear 'keep going' versus 'best to set it aside', it MUST have a real threshold(number, specific reaction)" if mode=="Extensive" and mode2=="Detailed" else "One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to watch or investigate. If it's an idea, one thing to validate before going further. 6-sentence-max"}"""
 
 
 st.set_page_config(page_title="Business Analyzer", layout="wide")
@@ -126,7 +156,8 @@ st.markdown("<style>h1 {text-align: center;}</style>", unsafe_allow_html=True)
 st.markdown("""<style>div[data-testid="stButton"] button { transition: transform 0.15s ease, box-shadow 0.15s ease;}
 div[data-testid="stButton"] button:hover {transform: scale(1.15); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}</style>""", unsafe_allow_html=True)
 st.divider()
-
+st.markdown("""<style> #analysis-card {border: 3px solid #2ecc71; border-radius:10px; padding: 20px; transition: border-color 3.5s; animation: fadeIn 1.0s ease-in;} @keyframes fadeIn {from {opacity: 0;} to {opacity: 1;}}
+</style>""", unsafe_allow_html=True)
 
 if "query_count" not in st.session_state:
     st.session_state.query_count=0
@@ -148,6 +179,8 @@ if "psugs" not in st.session_state:
     st.session_state.psugs=None
 if "cache" not in st.session_state:
     st.session_state.cache={}
+if "notes" not in st.session_state:
+    st.session_state.notes={}
     
 if st.session_state.psugs:
     st.session_state[f"input_{st.session_state.input_key}"]=st.session_state.psugs
@@ -264,6 +297,18 @@ else:
         if st.button("Clear"):
             st.session_state.cached_hit=None
             st.rerun()
+
+
+        if st.session_state.get("last_result") and not st.session_state.is_running:
+            render_analysis_card(st.session_state.last_label, st.session_state.last_result, st.session_state.last_banner_type, st.session_state.last_banner_color, st.session_state.last_qcount, st.session_state.last_wc, st.session_state.last_elapsed, st.session_state.last_model)
+
+            if st.button(" New analysis 🔄"):
+                st.session_state.last_result=None
+                st.session_state.analysis_done=False
+                st.session_state.input_key+=1
+                st.rerun()
+
+    
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
 
@@ -286,17 +331,14 @@ else:
             bannert="Idea"
             bannerc="#9b59b6"
         st.markdown(f'<div id="recognize-msg" style="background-color:{bannerc}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{bannert}: {label}</div>', unsafe_allow_html=True)
-
+        st.divider()
 
         st.session_state.query_count+=1
         st.divider()
         st.markdown("""<style>div[data-testid="stProgress"] {position: fixed;
 bottom: 0; left: 0; width: 100%; z-index: 999; background: white; padding: 10px;}
 div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse 1.7s ease-in-out infinite;}
-@keyframes barPulse{0%{opacity:1;}50%{opacity:0.6;}100%{opacity:1;}}
-
-#analysis-card {border: 3px solid orange; border-radius:10px; padding: 20px; transition: border-color 3.5s; animation: fadeIn 1.0s ease-in;}
-@keyframes fadeIn {from {opacity: 0;} to {opacity: 1;}} </style>""", unsafe_allow_html=True)
+@keyframes barPulse{0%{opacity:1;}50%{opacity:0.6;}100%{opacity:1;}}</style>""", unsafe_allow_html=True)
 
 
         placeholder=st.empty()
@@ -309,56 +351,39 @@ div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse
         if result and result.startswith("ERROR"):
             placeholder.error(result)
             st.session_state.query_count-=1
-        else:
-            anim_id=f"anim-{time.time()}"
-            st.markdown(f"""<style id="{anim_id}"> #analysis-card {{border-color: #2ecc71 !important;}}</style>""", unsafe_allow_html=True)
-            display_final=result.split("\n", 1)[1] if "\n" in result else result
-
-            highlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', r'<span style="background-color:#3a7ca5; padding:1px 4px; border-radius:3px;">\1</span>', display_final)
-            highlighted=highlighted.replace("[Stable]", '<span style="color:#2ecc71;">[Stable]</span>')
-            highlighted=highlighted.replace("[Shifting]", '<span style="color:#f39c12;">[Shifting]</span>')
-            highlighted=highlighted.replace("[Volatile]", '<span style="color:#e74c3c;">[Volatile]</span>')
-            placeholder.markdown(f'<div id="analysis-card">\n{highlighted}\n</div>', unsafe_allow_html=True)
-
-            
         st.session_state.is_running=False
+        
+            
+        
         st.toast("Analysis complete ✅")
         st.session_state.analysis_done=True
         st.session_state.history.append(label)
         st.session_state.historyd[label]=result
+        st.session_state.last_result=result
+        st.session_state.last_label=label
+        st.session_state.last_banner_type=bannert
+        st.session_state.last_banner_color=bannerc
+        
 
+       
         if result and not result.startswith("ERROR"):
             cache_key=f"{cleaned_input.lower()} | {mode} | {mode2} | {tone}"
             full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
             st.session_state.cache[cache_key]=(result, elapsed, final_wc, full_label)
-        st.caption(f"{st.session_state.query_count}/{mqps} analyses used this session.")
-        model_used="Sonnet" if mode2=="Detailed" else "Haiku"
-        st.caption(f"Words: {final_wc}  |  Time: {elapsed}s | Model: {model_used}")
+        st.session_state.last_qcount=st.session_state.query_count
+        st.session_state.last_model=model_used="Sonnet" if mode2=="Detailed" else "Haiku"
+        st.session_state.last_wc=final_wc
+        st.session_state.last_elapsed=elapsed
+        st.rerun()
 
-        if result and not result.startswith("ERROR"):
-            clean_text=re.sub(r"###\s*", "", result)
-            clean_text=re.sub(r"\[.*?\]", "", clean_text)
-            clean_text=clean_text.strip()
-            st.components.v1.html(f"""<textarea id="copytext" style="display:none;">{clean_text}</textarea>
-<button id="copybtn" onclick="navigator.clipboard.writeText(document.getElementById('copytext').value);
-document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='📋';}}, 2300);"
-style="padding:8px 16px; border-radius:6px; cursor:pointer;">📋</button>""", height=50)
-            
-
-
-        if st.session_state.get("analysis_done"):
-            if st.button(" New analysis 🔄"):
-                st.session_state.analysis_done=False
-                st.session_state.input_key+=1
-                st.rerun()
 
 with st.expander("Session history"):
     if st.session_state.history:
         selected=st.radio("Past Analyses:", ["- select 2 view -"] + st.session_state.history, key="history_select")
         if selected and selected in st.session_state.historyd and selected != "- select 2 view -":
             st.markdown(st.session_state.historyd[selected].split("\n", 1)[1] if "\n" in st.session_state.historyd[selected] else st.session_state.historyd[selected])
-    else:
-        st.caption("No analysis yet.")
+        else: 
+            st.caption("No analysis yet.")
 
 with st.expander("About this tool"):
     st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
