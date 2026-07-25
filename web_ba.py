@@ -14,11 +14,16 @@ except Exception:
 client=anthropic.Anthropic(api_key=api_key)
 mqps=3
 
+hcpt=1.00/1000000
+hopt=5.00/1000000
+scpt=3.00/1000000
+sopt=15.00/1000000
+
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
-    targetw=1000 if mode=="Brief" else 1925
+    targetw=1300 if mode=="Brief" else 1925
     stime=time.time()
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=1550 if mode=="Brief" else 3250, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=2050 if mode=="Brief" else 3250, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             last_percent=-1
@@ -36,14 +41,29 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
                     placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
                     word_count=len(display_text.split())
                     percent=min(int((word_count/targetw)*100), 100)
+
                     if percent!=last_percent:
                         progress_bar.progress(percent)
                         last_percent=percent
                     time.sleep(0.33)
 
+            final_message=stream.get_final_message()
+            input_tokens=final_message.usage.input_tokens
+            output_tokens=final_message.usage.output_tokens
+
+            if mode2=="Simplified":
+                input_cost=input_tokens*haiku_input_cost_per_token
+                output_cost=output_tokens*haiku_output_cost_per_token
+            else:
+                input_cost=input_tokens*sonnet_input_cost_per_token
+                output_cost=output_tokens*sonnet_output_cost_per_token
+            call_cost=input_cost+output_cost
+            
+            placeholder.markdown(f'<div id="analysis-card" class="done">\n{display_text}\n</div>', unsafe_allow_html=True)
             elapsed=round(time.time()-stime, 1)
+            time.sleep(3.7)
             final_wc=len(full_text.split())
-            return full_text, elapsed, final_wc
+            return full_text, elapsed, final_wc, call_cost
 
     except anthropic.AuthenticationError:
         return "ERROR: API key is missing or invalid.", 0, 0
@@ -61,17 +81,18 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
 
 
 
-def render_analysis_card(rlabel, rresult, banner_type, banner_color, qcount, wc, elapsed_time, model_used, show_notes=True):
+def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcount, wc, elapsed_time, model_used, show_notes=True):
     st.markdown(f'<div id="recognize-msg" style="background-color:{banner_color}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{banner_type}: {rlabel}</div>', unsafe_allow_html=True)
     st.divider()
     rdisplay=rresult.split("\n", 1)[1] if "\n" in rresult else rresult
-    rhighlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', r'<span style="background-color:#7e6957; padding:1px 4px; border-radius:3px;">\1</span>', rdisplay)
+    rhighlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', r'<span style="background-color:#b3b792; padding:1px 4px; border-radius:3px;">\1</span>', rdisplay)
     rhighlighted=rhighlighted.replace("[Stable]", '<span style="color:#2ecc71;">[Stable]</span>')
     rhighlighted=rhighlighted.replace("[Shifting]", '<span style="color:#f39c12;">[Shifting]</span>')
     rhighlighted=rhighlighted.replace("[Volatile]", '<span style="color:#e74c3c;">[Volatile]</span>')
-    st.markdown(f'<div id="analysis-card">\n{rhighlighted}\n</div>', unsafe_allow_html=True)
+
+    st.markdown(f'<div id="analysis-card" class="done">\n{rhighlighted}\n</div>', unsafe_allow_html=True)
     if show_notes:
-        st.session_state.notes[rlabel]=st.text_area("Analysis Notes", value=st.session_state.notes.get(rlabel, ""), key=f"note_{rlabel}", placeholder="Jot down your reaction")
+        st.session_state.notes[rkey]=st.text_area("Analysis Notes", value=st.session_state.notes.get(rkey, ""), key=f"note_{rkey}", placeholder="Jot down your reaction")
     st.caption(f"{qcount}/{mqps} analyses used this session.")
     st.caption(f"Words: {wc}  |  Time: {elapsed_time}s | Model: {model_used}")
     rclean=re.sub(r"###\s*", "", rresult)
@@ -90,7 +111,6 @@ Maintain one consistent stance throughout - Do not conflict/contradict with prev
 Any claim implying scale or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words. For each major data claim, briefly note its basis in parentheses: (public data), (industry estimate), or (inference) - so it's clear how much to trust each figure
 During the analysis, explicitly connect two sections = show how a finding in one section explains or causes something stated in another
 Immediately after each header's text, on the exact same line, append either: '[Stable]', '[Shifting]', or '[Volatile]' - based on how fast that factor changes in the real world. no explanation
-
 
 if company, cover each header in order:
 ### Revenue Structure
@@ -135,7 +155,7 @@ One to two sharp, specific questions this analysis surfaces that only someone wi
 
 Start with exactly: [Company: name] or [Idea: 2-4 word label](long answers: 95% ideas), then a blank line
 Each sentence must have a min. of 11 and a max. of 25 words, NEVER MORE. Don't combine different ideas under same paragraph
-{"Cover ALL headers while keeping analysis under 1300 words max. Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain NO MORE than 3 sentences. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers with full depth. Depth and corectness matter more than length so write as much as GENUINELY NEEDED. Use exactly 3 to 4 paragraphs per '###header', separated by a blank line. Each paragraph can NOT contain more than 8 sentences. Vary angle per paragraph where natural - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
+{"Write as many words as genuinely needed following these rules: Use exactly 2 paragraphs per header, separated by a blank line. Each paragraph MUST contain THREE sentences or LESS, NEVER MORE. Cover the most critical point per header" if mode=="Brief" else "Cover ALL headers with full depth. Depth and corectness matter more than length so write as much as GENUINELY NEEDED. Use exactly 3 to 4 paragraphs per '###header', separated by a blank line. Each paragraph can NOT contain more than 8 sentences. Vary angle per paragraph where natural - rotate between financial, competitive, behavioral, and structural angles across paragraphs"} {"Focus on hard data: real figures, specific percentages." if "Company" in input_type else "Focus on realistic scenarios: first 90 days, similar ideas failure patterns, specific entry barriers."}
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly these sections:
@@ -154,10 +174,13 @@ st.title("Business Analyzer 📊 ")
 st.markdown("<p style='text-align: center; color: gray; font-size: 0.9em;'>Drop a company or idea, get it analyzed thoroughly</p>", unsafe_allow_html=True)
 st.markdown("<style>h1 {text-align: center;}</style>", unsafe_allow_html=True)
 st.markdown("""<style>div[data-testid="stButton"] button { transition: transform 0.15s ease, box-shadow 0.15s ease;}
-div[data-testid="stButton"] button:hover {transform: scale(1.15); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}</style>""", unsafe_allow_html=True)
+div[data-testid="stButton"] button:hover {transform: scale(1.11); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}</style>""", unsafe_allow_html=True)
+
 st.divider()
-st.markdown("""<style> #analysis-card {border: 3px solid #2ecc71; border-radius:10px; padding: 20px; transition: border-color 3.5s; animation: fadeIn 1.0s ease-in;} @keyframes fadeIn {from {opacity: 0;} to {opacity: 1;}}
+st.markdown("""<style> #analysis-card {border: 3px solid #e67e22; border-radius:10px; padding:20px; transition:border-color 3.5s; animation:fadeIn 1.0s ease-in;}
+#analysis-card.done {border-color: #2ecc71;} @keyframes fadeIn {from {opacity:0;} to {opacity:1;}}
 </style>""", unsafe_allow_html=True)
+
 
 if "query_count" not in st.session_state:
     st.session_state.query_count=0
@@ -181,6 +204,10 @@ if "cache" not in st.session_state:
     st.session_state.cache={}
 if "notes" not in st.session_state:
     st.session_state.notes={}
+if "history_keys" not in st.session_state:
+    st.session_state.history_keys=[]
+if "entry_meta" not in st.session_state:
+    st.session_state.entry_meta={}
     
 if st.session_state.psugs:
     st.session_state[f"input_{st.session_state.input_key}"]=st.session_state.psugs
@@ -251,14 +278,15 @@ with sugs_col:
 if st.session_state.query_count>=mqps:
     st.warning(f"You've used all {mqps} analyses this session. Refresh the page to start over.")
     st.subheader("Session Recap")
-    for past_l in st.session_state.history:
-        full_analysis=st.session_state.historyd[past_l]
+    for entry_key in st.session_state.history_keys:
+        full_analysis=st.session_state.historyd[entry_key]
+        meta=st.session_state.entry_meta[entry_key]
         if "### The Move" in full_analysis:
             move_section=full_analysis.split("### The Move")[1]
             move_section=move_section.split("###")[0].strip()
         else:
             move_section="No move identified."
-        st.markdown(f"**{past_l}** - {move_section}")    
+        st.markdown(f"**{meta['label']} ({meta['mode']}/{meta['mode2']}/{meta['tone']})** - {move_section}")    
 else:
     if st.button("Analyze", disabled=st.session_state.is_running, on_click=handle_analyze):
        pass
@@ -288,25 +316,25 @@ else:
         key=st.session_state.cached_hit
         cached_result, cached_elapsed, cached_wc, cached_label=st.session_state.cache[key]
         st.info("Instant⚡")
-        st.subheader(cached_label)
-        st.divider()
-        card=st.container(border=True)
-        with card:
-            st.markdown(cached_result.split("\n", 1)[1] if "\n" in cached_result else cached_result)
-        st.caption(f"Words: {cached_wc} | Time: {cached_elapsed}s")
+        cached_type, cached_name=cached_label.split(": ", 1) if ": " in cached_label else ("Company", cached_label)
+        cached_color="#3498db" if cached_type=="Company" else "#9b59b6"
+        render_analysis_card(cached_name, key, cached_result, cached_type, cached_color, st.session_state.query_count, cached_wc, cached_elapsed, "Sonnet" if mode2=="Detailed" else "Haiku")
         if st.button("Clear"):
             st.session_state.cached_hit=None
             st.rerun()
+        
 
 
-        if st.session_state.get("last_result") and not st.session_state.is_running:
-            render_analysis_card(st.session_state.last_label, st.session_state.last_result, st.session_state.last_banner_type, st.session_state.last_banner_color, st.session_state.last_qcount, st.session_state.last_wc, st.session_state.last_elapsed, st.session_state.last_model)
 
-            if st.button(" New analysis 🔄"):
-                st.session_state.last_result=None
-                st.session_state.analysis_done=False
-                st.session_state.input_key+=1
-                st.rerun()
+    if st.session_state.get("last_result") and not st.session_state.is_running:
+        render_analysis_card(st.session_state.last_label, st.session_state.last_key, st.session_state.last_result, st.session_state.last_banner_type, st.session_state.last_banner_color, st.session_state.last_qcount, st.session_state.last_wc, st.session_state.last_elapsed, st.session_state.last_model)
+
+        if st.button(" New analysis 🔄"):
+            st.session_state.last_result=None
+            st.session_state.cached_hit=None
+            st.session_state.analysis_done=False
+            st.session_state.input_key+=1
+            st.rerun()
 
     
     if st.session_state.is_running:
@@ -334,7 +362,6 @@ else:
         st.divider()
 
         st.session_state.query_count+=1
-        st.divider()
         st.markdown("""<style>div[data-testid="stProgress"] {position: fixed;
 bottom: 0; left: 0; width: 100%; z-index: 999; background: white; padding: 10px;}
 div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse 1.7s ease-in-out infinite;}
@@ -348,28 +375,33 @@ div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse
             progress_bar.empty()
 
 
+        st.session_state.is_running=False
         if result and result.startswith("ERROR"):
             placeholder.error(result)
             st.session_state.query_count-=1
-        st.session_state.is_running=False
+            st.stop()
+    
         
             
         
         st.toast("Analysis complete ✅")
         st.session_state.analysis_done=True
+        cache_key=f"{cleaned_input.lower()} | {mode} | {mode2} | {tone}"
         st.session_state.history.append(label)
-        st.session_state.historyd[label]=result
+        st.session_state.history_keys.append(cache_key)
+        st.session_state.entry_meta[cache_key]={"label":label, "mode":mode, "mode2":mode2, "tone":tone}
+        st.session_state.historyd[cache_key]=result
         st.session_state.last_result=result
         st.session_state.last_label=label
+        st.session_state.last_key=cache_key
         st.session_state.last_banner_type=bannert
         st.session_state.last_banner_color=bannerc
         
 
        
-        if result and not result.startswith("ERROR"):
-            cache_key=f"{cleaned_input.lower()} | {mode} | {mode2} | {tone}"
-            full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
-            st.session_state.cache[cache_key]=(result, elapsed, final_wc, full_label)
+        
+        full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
+        st.session_state.cache[cache_key]=(result, elapsed, final_wc, full_label)
         st.session_state.last_qcount=st.session_state.query_count
         st.session_state.last_model=model_used="Sonnet" if mode2=="Detailed" else "Haiku"
         st.session_state.last_wc=final_wc
@@ -378,12 +410,22 @@ div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse
 
 
 with st.expander("Session history"):
-    if st.session_state.history:
-        selected=st.radio("Past Analyses:", ["- select 2 view -"] + st.session_state.history, key="history_select")
-        if selected and selected in st.session_state.historyd and selected != "- select 2 view -":
-            st.markdown(st.session_state.historyd[selected].split("\n", 1)[1] if "\n" in st.session_state.historyd[selected] else st.session_state.historyd[selected])
+    if st.session_state.history_keys:
+        display_to_key={}
+        for k in st.session_state.history_keys:
+            m=st.session_state.entry_meta[k]
+            disp=f"{m['label']} ({m['mode']}/{m['mode2']}/{m['tone']})"
+            display_to_key[disp]=k
+        selected_disp=st.radio("Past Analyses:", ["- select 2 view -"] + list(display_to_key.keys()), key="history_select")
+        if selected_disp and selected_disp != "- select 2 view -":
+            sel_key=display_to_key[selected_disp]
+            full_result=st.session_state.historyd[sel_key]
+            st.markdown(full_result.split("\n", 1)[1] if "\n" in full_result else full_result)
+            st.session_state.notes[sel_key]=st.text_area("Analysis Notes", value=st.session_state.notes.get(sel_key, ""), key=f"note_hist_{sel_key}", placeholder="Write down your reaction")
         else: 
-            st.caption("No analysis yet.")
+            st.caption("Select an analysis above to view it")
+    else:
+        st.caption("No analysis yet")
 
 with st.expander("About this tool"):
     st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
