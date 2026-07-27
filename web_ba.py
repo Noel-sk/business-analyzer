@@ -19,33 +19,48 @@ hopt=5.00/1000000
 scpt=3.00/1000000
 sopt=15.00/1000000
 
+color_company="#3498db"
+color_idea="#9b59b6"
+colorcard_orange="#e67e22"
+colorcard_green="#2ecc71"
+color_shifting="#f39c12"
+color_volatile="#e74c3c"
+color_highlight="#b3b792"
+
+bg_light="#ffffff"
+bg_dark="#0e1117"
+text_light="#000000"
+text_dark="#fafafa"
+
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
     targetw=1400 if mode=="Brief" else 2125
     stime=time.time()
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=2050 if mode=="Brief" else 3750, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=2150 if mode=="Brief" else 3750, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             last_percent=-1
             first_line_done=False
-            for text in stream.text_stream:
-                full_text+=text
+            for event in stream:
+                if event.type=="content_block_delta" and event.delta.type=="text_delta":
+                    text=event.delta.text
+                    full_text+=text
 
-                if not first_line_done:
-                    if "\n" in full_text:
-                        first_line_done=True
-                        display_text=full_text.split("\n", 1)[1]
-                    placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
-                else:
-                    display_text+=text
-                    placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
-                    word_count=len(display_text.split())
-                    percent=min(int((word_count/targetw)*100), 100)
+                    if not first_line_done:
+                        if "\n" in full_text:
+                            first_line_done=True
+                            display_text=full_text.split("\n", 1)[1]
+                        placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
+                    else:
+                        display_text+=text
+                        placeholder.markdown(f'<div id="analysis-card">\n{display_text}\n</div>', unsafe_allow_html=True)
+                        word_count=len(display_text.split())
+                        percent=min(int((word_count/targetw)*100), 100)
 
-                    if percent!=last_percent:
-                        progress_bar.progress(percent)
-                        last_percent=percent
-                    time.sleep(0.33)
+                        if percent!=last_percent:
+                            progress_bar.progress(percent)
+                            last_percent=percent
+                        time.sleep(0.33)
 
 
             final_message=stream.get_final_message()
@@ -87,10 +102,10 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
     st.divider()
     
     rdisplay=rresult.split("\n", 1)[1] if "\n" in rresult else rresult
-    rhighlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', r'<span style="background-color:#b3b792; padding:1px 4px; border-radius:3px;">\1</span>', rdisplay)
-    rhighlighted=rhighlighted.replace("[Stable]", '<span style="color:#2ecc71;">[Stable]</span>')
-    rhighlighted=rhighlighted.replace("[Shifting]", '<span style="color:#f39c12;">[Shifting]</span>')
-    rhighlighted=rhighlighted.replace("[Volatile]", '<span style="color:#e74c3c;">[Volatile]</span>')
+    rhighlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', rf'<span style="background-color:{color_highlight}; padding:1px 4px; border-radius:3px;">\1</span>', rdisplay)
+    rhighlighted=rhighlighted.replace("[Stable]", f'<span style="color:{colorcard_green};">[Stable]</span>')
+    rhighlighted=rhighlighted.replace("[Shifting]", f'<span style="color:{color_shifting};">[Shifting]</span>')
+    rhighlighted=rhighlighted.replace("[Volatile]", f'<span style="color:{color_volatile};">[Volatile]</span>')
     st.markdown(f'<div id="analysis-card" class="done">\n{rhighlighted}\n</div>', unsafe_allow_html=True)
 
     if show_notes:
@@ -163,7 +178,7 @@ Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly these sections:
 ### Vital Metrics
-List the 4 to 5 most load-bearing numbers from this entire analysis in one place - the ones that, if wrong, would change the conclusion. Format each as its own numbered line, structured as: **[where it came from]** - the number and why it matters, written as one full sentence, not a fragment. Pull from what's already stated above, nothing new
+List the 3 most load-bearing numbers from this entire analysis in one place - the ones that, if wrong, would change the conclusion. Format each as its own numbered line, structured as: **[where it came from]** - the number and why it matters, written as one full sentence, not a fragment. Pull from what's already stated above, nothing new
 
 ### Weak Point
 {"Identify 1 critical assumption this analysis is quietly relying on. The kind that, if wrong or suddenly changes, it ivalidates the whole point. Also state where this analysis was most confident based on actual facts" if tone=="Brutal" else "Call out directly where this analysis was overconfident or too certain, and why that confidence isn't fully earned. 3-sentence-max"}
@@ -173,16 +188,18 @@ List the 4 to 5 most load-bearing numbers from this entire analysis in one place
 
 
 
-st.set_page_config(page_title="Business Analyzer", layout="wide")
+st.set_page_config(page_title="Business Analyzer", page_icon="📊", layout="wide")
 st.title("Business Analyzer 📊 ")
 st.markdown("<p style='text-align: center; color: gray; font-size: 0.9em;'>Drop a company or idea, get it analyzed thoroughly</p>", unsafe_allow_html=True)
-st.markdown("<style>h1 {text-align: center;}</style>", unsafe_allow_html=True)
+st.markdown('<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">', unsafe_allow_html=True)
+st.markdown("""<style> html, body, [class*="css"] {font-family: 'Inter', sans-serif;}
+h1 {text-align: center;}</style>""", unsafe_allow_html=True)
 st.markdown("""<style>div[data-testid="stButton"] button { transition: transform 0.15s ease, box-shadow 0.15s ease;}
 div[data-testid="stButton"] button:hover {transform: scale(1.11); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}</style>""", unsafe_allow_html=True)
 
 st.divider()
-st.markdown("""<style> #analysis-card {border: 3px solid #e67e22; border-radius:10px; padding:20px; transition:border-color 3.5s; animation:fadeIn 1.0s ease-in;}
-#analysis-card.done {border-color: #2ecc71;} @keyframes fadeIn {from {opacity:0;} to {opacity:1;}}
+st.markdown(f"""<style> #analysis-card {{border: 3px solid {colorcard_orange}; border-radius:10px; padding:20px; transition:border-color 3.5s; animation:fadeIn 1.0s ease-in;}}
+#analysis-card.done {{border-color: {colorcard_green};}} @keyframes fadeIn {{from {{opacity:0;}} to {{opacity:1;}}}}
 </style>""", unsafe_allow_html=True)
 
 
@@ -214,10 +231,13 @@ if "entry_meta" not in st.session_state:
     st.session_state.entry_meta={}
 if "total_cost" not in st.session_state:
     st.session_state.total_cost=0.0
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode=False
     
 if st.session_state.psugs:
     st.session_state[f"input_{st.session_state.input_key}"]=st.session_state.psugs
     st.session_state.psugs=None
+
 
 
 
@@ -230,6 +250,18 @@ with col3:
     tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.")
     
 st.caption(f"Session cost: ${st.session_state.total_cost:.4f}")
+if st.button("Dark Mode 🌙" if not st.session_state.dark_mode else "Light Mode ☀️"):
+    st.session_state.dark_mode=not st.session_state.dark_mode
+    st.rerun()
+
+page_bg=bg_dark if st.session_state.dark_mode else bg_light
+page_text=text_dark if st.session_state.dark_mode else text_light
+divider_color="#444444" if st.session_state.dark_mode else "#dddddd"  
+st.markdown(f"""<style> .stApp {{background-color:{page_bg}; color:{page_text};}}
+.stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp div:not([id]), .stApp span:not([style]) {{color:{page_text} !important;}}
+div[data-testid="stButton"] button {{background-color:{page_bg}; color:{page_text}; border:1px solid {page_text};}}
+hr {{border-color:{divider_color} !important;}}</style>""", unsafe_allow_html=True)
+
 
 
 
@@ -275,13 +307,12 @@ def handle_analyze():
 input_col, sugs_col=st.columns([4,1.3])
 with input_col:
     user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze)
-    st.caption(f"{len(user_input)}/100 characters")
-    
+    st.caption(f"{len(user_input)}/100 characters")  
 with sugs_col:
     examples=[("Airbnb", "Company"), ("AI-automated Air Traffic Controller System", "Idea"), ("SaaS For Bio-Engineers", "Idea"), ("Adidas", "Company"), ("Subscription Meal Kits", "Idea"), ("Equinox", "Company"), ("Corporate Meditation Studios", "Idea")]
     sug_name=st.session_state.sugs[0]
     sug_type=st.session_state.sugs[1]
-    sug_badge="#3498db" if sug_type=="Company" else "#9b59b6"
+    sug_badge=color_company if sug_type=="Company" else color_idea
     st.markdown("**Inspiration Panel**")
     st.markdown(f'''<div style="border:1px solid #555; border-radius:6px; padding:8px 12px;
 background-color:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:space-between;"> <span>{sug_name}</span>
@@ -307,6 +338,7 @@ background-color:rgba(255,255,255,0.05); display:flex; align-items:center; justi
         st.session_state.sugs=surprise_pick
         st.session_state.psugs=st.session_state.sugs[0]
         st.rerun()
+
 
 
         
@@ -340,7 +372,7 @@ else:
         cached_result, cached_elapsed, cached_wc, cached_label, cached_cost=st.session_state.cache[key]
         st.info("Instant⚡")
         cached_type, cached_name=cached_label.split(": ", 1) if ": " in cached_label else ("Company", cached_label)
-        cached_color="#3498db" if cached_type=="Company" else "#9b59b6"
+        cached_color=color_company if cached_type=="Company" else color_idea
         render_analysis_card(cached_name, key, cached_result, cached_type, cached_color, st.session_state.query_count, cached_wc, cached_elapsed, "Sonnet" if mode2=="Detailed" else "Haiku", cached_cost)
         if st.button("Clear"):
             st.session_state.cached_hit=None
@@ -373,20 +405,20 @@ else:
         if "Company" in first_line:                                                                                          
             label=first_line.replace("[Company:", "").replace("]", "").strip()
             bannert="Company"
-            bannerc="#3498db"
+            bannerc=color_company
         else:
             label=first_line.replace("[Idea:", "").replace("]", "").strip()
             bannert="Idea"
-            bannerc="#9b59b6"
+            bannerc=color_idea
         st.markdown(f'<div id="recognize-msg" style="background-color:{bannerc}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{bannert}: {label}</div>', unsafe_allow_html=True)
         st.divider()
 
         st.session_state.query_count+=1
-        st.markdown("""<style>div[data-testid="stProgress"] {position: fixed;
-bottom: 0; left: 0; width: 100%; z-index: 999; background: white; padding: 10px;}
-div[data-testid="stProgress"] div[role="progressbar"] > div {animation: barPulse 1.7s ease-in-out infinite;}
-@keyframes barPulse{0%{opacity:1;}50%{opacity:0.6;}100%{opacity:1;}}</style>""", unsafe_allow_html=True)
-
+        st.markdown(f"""<style>div[data-testid="stProgress"] {{position: fixed;
+bottom: 0; left: 0; width: 100%; z-index: 999; background: {page_bg}; padding: 10px;}}
+div[data-testid="stProgress"] div[role="progressbar"] > div {{background-color:{color_company}; animation: barPulse 1.7s ease-in-out infinite;}}
+@keyframes barPulse{{0%{{opacity:1;}}50%{{opacity:0.6;}}100%{{opacity:1;}}}}
+div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_text} !important;}}</style>""", unsafe_allow_html=True)
 
 
 
