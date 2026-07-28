@@ -33,10 +33,10 @@ text_light="#000000"
 text_dark="#fafafa"
 
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
-    targetw=1400 if mode=="Brief" else 2125
+    targetw=1450 if mode=="Brief" else 2125
     stime=time.time()
     try:
-        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=2150 if mode=="Brief" else 3750, messages=[{"role": "user", "content": prompt}]) as stream:
+        with client.messages.stream(model="claude-haiku-4-5-20251001" if mode2=="Simplified" else "claude-sonnet-4-6", max_tokens=2250 if mode=="Brief" else 3750, messages=[{"role": "user", "content": prompt}]) as stream:
             full_text=""
             display_text=""
             last_percent=-1
@@ -79,21 +79,22 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
             elapsed=round(time.time()-stime, 1)
             time.sleep(3.7)
             final_wc=len(full_text.split())
-            return full_text, elapsed, final_wc, call_cost
+            was_cut=final_wc<(targetw*0.8)
+            return full_text, elapsed, final_wc, call_cost, was_cut
 
     except anthropic.AuthenticationError:
-        return "ERROR: API key is missing or invalid.", 0, 0, 0
+        return "ERROR: API key is missing or invalid. Check that your API key is set correctly in the app's secrets, then reload the page.", 0, 0, 0, False
     except anthropic.RateLimitError:
             if attempt==1:
                 return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
-            return "ERROR: Rate limit hit twice. Wait a moment and try again.", 0, 0, 0
+            return "ERROR: Rate limit hit twice. Wait about a minute, then click Analyze again - this doesn't count against your session limit.", 0, 0, 0, False
 
     except anthropic.APIConnectionError:
         if attempt==1:
             return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
-        return "ERROR: Could not connect.", 0, 0, 0
+        return "ERROR: Could not connect after two tries. Check your internet connection, then click Analyze again.", 0, 0, 0, False
     except Exception as  e:
-        return f"ERROR: Something went wrong - {str(e)}", 0, 0, 0
+        return f"ERROR: Something went wrong - {str(e)}. Try rephrasing your input, or click Analyze again in a moment.", 0, 0, 0, False
 
 
 
@@ -233,6 +234,29 @@ if "total_cost" not in st.session_state:
     st.session_state.total_cost=0.0
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode=False
+if "haiku_count" not in st.session_state:
+    st.session_state.haiku_count=0
+if "sonnet_count" not in st.session_state:
+    st.session_state.sonnet_count=0
+if "company_count" not in st.session_state:
+    st.session_state.company_count=0
+if "idea_count" not in st.session_state:
+    st.session_state.idea_count=0
+if "timing_log" not in st.session_state:
+    st.session_state.timing_log=[]
+if "drift" not in st.session_state:
+    st.session_state.drift=None
+if "confirm" not in st.session_state:
+    st.session_state.confirm=False
+if "confirm_dup_proceed" not in st.session_state:
+    st.session_state.confirm_dup_proceed=False
+if "do_focus" not in st.session_state:
+    st.session_state.do_focus=False
+if "just_reset" not in st.session_state: 
+    st.session_state.just_reset=False
+if st.session_state.just_reset:
+    st.toast("Session Reset ✅")
+    st.session_state.just_reset=False
     
 if st.session_state.psugs:
     st.session_state[f"input_{st.session_state.input_key}"]=st.session_state.psugs
@@ -248,11 +272,61 @@ with col2:
     mode2=st.radio("Configuration", ["Simplified", "Detailed"], horizontal=True, help="**Simplified** uses 'Haiku' (faster, lighter). **Detailed** uses 'Sonnet' (slower, sharper reasoning).")
 with col3:
     tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.")
-    
+
+
+
+current_combo=f"{mode}|{mode2}|{tone}"
+if st.session_state.drift is not None and st.session_state.drift!=current_combo:
+    st.toast("Settings changed ⚠️")
+st.session_state.drift=current_combo
+
+
+
+est_output=2150 if mode=="Brief" else 3750
+est_input=700
+if mode2=="Simplified":
+    est_cost=(est_input*hcpt)+(est_output*hopt)
+else:
+    est_cost=(est_input*scpt)+(est_output*sopt)
+st.caption(f"Estimated run cost: ~${est_cost:.4f} (actual may vary)")
 st.caption(f"Session cost: ${st.session_state.total_cost:.4f}")
-if st.button("Dark Mode 🌙" if not st.session_state.dark_mode else "Light Mode ☀️"):
-    st.session_state.dark_mode=not st.session_state.dark_mode
-    st.rerun()
+
+
+with st.expander("Session Summary"):
+    st.markdown(f"**Total Analysis:** {st.session_state.query_count}/{mqps}")
+    st.markdown(f"**Total Cost:** {st.session_state.total_cost:.4f}")
+    st.markdown(f"**Model Split:** Haiku, ({st.session_state.haiku_count}). Sonnet, ({st.session_state.sonnet_count})")
+    st.markdown(f"**Type Split:** Company, ({st.session_state.company_count}). Idea, ({st.session_state.idea_count})")
+    if st.session_state.timing_log:
+        avg_time=sum(st.session_state.timing_log)/len(st.session_state.timing_log)
+        st.markdown(f"**Avg. time per analysis:** {avg_time:.1f}s")
+        st.markdown(f"**Individual Times:** {', '.join(f'{t:.1f}s' for t in st.session_state.timing_log)}")
+
+col4, col5=st.columns(2)
+with col4:
+    if st.session_state.get("confirm"):
+        st.warning("Sure? This action can't be undone.")
+        confirm_col, cancel_col=st.columns(2)
+        with confirm_col:
+            if st.button("Yes, reset"):
+                keep_dark=st.session_state.dark_mode
+                st.session_state.clear()
+                st.session_state.dark_mode=keep_dark
+                st.session_state.just_reset=True
+                st.rerun()
+        with cancel_col:
+             if st.button("Cancel"):
+                st.session_state.confirm=False
+                st.rerun()
+    else:
+        if st.button("Reset Session 🔄"):
+            st.session_state.confirm=True
+            st.rerun()
+with col5:
+    if st.button("Dark Mode 🌙" if not st.session_state.dark_mode else "Light Mode ☀️"):
+        st.session_state.dark_mode=not st.session_state.dark_mode
+        st.rerun()
+
 
 page_bg=bg_dark if st.session_state.dark_mode else bg_light
 page_text=text_dark if st.session_state.dark_mode else text_light
@@ -308,6 +382,11 @@ input_col, sugs_col=st.columns([4,1.3])
 with input_col:
     user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze)
     st.caption(f"{len(user_input)}/100 characters")  
+    if st.session_state.get("do_focus"):
+        st.components.v1.html("""<script> var inputs=window.parent.document.querySelectorAll('input[type="text"]');
+if(inputs.length>0){inputs[inputs.length-1].focus();} </script>""", height=0)
+        st.session_state.do_focus=False       
+
 with sugs_col:
     examples=[("Airbnb", "Company"), ("AI-automated Air Traffic Controller System", "Idea"), ("SaaS For Bio-Engineers", "Idea"), ("Adidas", "Company"), ("Subscription Meal Kits", "Idea"), ("Equinox", "Company"), ("Corporate Meditation Studios", "Idea")]
     sug_name=st.session_state.sugs[0]
@@ -330,6 +409,7 @@ background-color:rgba(255,255,255,0.05); display:flex; align-items:center; justi
             while new_pick==st.session_state.sugs:
                 new_pick=random.choice(examples)
             st.session_state.sugs=new_pick
+            st.session_state.do_focus=True
             st.rerun()
     if st.button("Surprise Me"):
         surprise_pick=random.choice(examples)
@@ -337,6 +417,7 @@ background-color:rgba(255,255,255,0.05); display:flex; align-items:center; justi
             surprise_pick=random.choice(examples)
         st.session_state.sugs=surprise_pick
         st.session_state.psugs=st.session_state.sugs[0]
+        st.session_state.do_focus=True
         st.rerun()
 
 
@@ -355,9 +436,41 @@ if st.session_state.query_count>=mqps:
             move_section="No move identified."
         st.markdown(f"**{meta['label']} ({meta['mode']}/{meta['mode2']}/{meta['tone']})** - {move_section}")    
 else:
-    analyze_button_label="Analyze Anyway" if st.session_state.get("show_dup_warning") else "Analyze"
-    if st.button(analyze_button_label, disabled=st.session_state.is_running, on_click=handle_analyze):
-       pass
+    if st.session_state.query_count==mqps-1:
+        st.warning(f"Last analysis this session ⚠️ ({st.session_state.query_count+1}/{mqps})")
+
+    if st.session_state.get("show_dup_warning") and st.session_state.get("confirm_dup_proceed"):
+        analyze_button_label="Confirm Analyze Anyway"
+    elif st.session_state.get("show_dup_warning"):
+        analyze_button_label="Analyze Anyway"
+    elif st.session_state.query_count==mqps-1:
+        analyze_button_label="Analyze (Final)"
+    else:
+        analyze_button_label="Analyze"
+
+
+
+    if st.session_state.get("show_dup_warning"):
+        col6, col7=st.columns(2)
+        with col6:
+            if st.session_state.get("confirm_dup_proceed"):
+                if st.button(analyze_button_label, disabled=st.session_state.is_running, on_click=handle_analyze):
+                    pass
+            else:
+                if st.button(analyze_button_label):
+                    st.session_state.confirm_dup_proceed=True
+                    st.rerun()
+        with col7:
+            if st.button("Cancel"):
+                st.session_state.show_dup_warning=False
+                st.session_state.confirm_dup_proceed=False
+                st.rerun()
+        
+    else:
+        if st.button(analyze_button_label, disabled=st.session_state.is_running, on_click=handle_analyze):
+            pass
+        
+
     if st.session_state.get("pending_warning"):
         st.warning(st.session_state.pending_warning)
         st.session_state.pending_warning=None 
@@ -388,6 +501,7 @@ else:
             st.session_state.cached_hit=None
             st.session_state.analysis_done=False
             st.session_state.input_key+=1
+            st.session_state.do_focus=True
             st.rerun()
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
@@ -425,7 +539,7 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         placeholder=st.empty()
         with st.spinner("Analyzing..."):
             progress_bar=st.progress(0)
-            result, elapsed, final_wc, call_cost=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar)
+            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar)
             progress_bar.empty()
             
         st.session_state.is_running=False
@@ -440,6 +554,8 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
             
         
         st.toast("Analysis complete ✅")
+        if was_cut:
+            st.warning("This analysis may have been cut short b4 it finished. Consider re-running if incomplete.")
         st.session_state.analysis_done=True
         cache_key=f"{cleaned_input.lower()} | {mode} | {mode2} | {tone}"
         st.session_state.history.append(label)
@@ -452,7 +568,15 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         st.session_state.last_banner_type=bannert
         st.session_state.last_banner_color=bannerc
         st.session_state.total_cost=st.session_state.total_cost+call_cost
-        
+        if mode2=="Simplified":
+            st.session_state.haiku_count=st.session_state.haiku_count+1
+        else:
+            st.session_state.sonnet_count=st.session_state.sonnet_count+1
+        if bannert=="Company":
+            st.session_state.company_count=st.session_state.company_count+1
+        else:
+            st.session_state.idea_count=st.session_state.idea_count+1
+        st.session_state.timing_log.append(elapsed)
         full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
         st.session_state.cache[cache_key]=(result, elapsed, final_wc, full_label, call_cost)
         st.session_state.last_qcount=st.session_state.query_count
