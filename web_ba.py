@@ -1,6 +1,5 @@
 import streamlit as st
 import anthropic
-import threading
 import random
 import time
 import os
@@ -32,7 +31,7 @@ bg_dark="#0e1117"
 text_light="#000000"
 text_dark="#fafafa"
 
-def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1):
+def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, timer_placeholder, attempt=1):
     targetw=1450 if mode=="Brief" else 2125
     stime=time.time()
     try:
@@ -60,6 +59,8 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
                         if percent!=last_percent:
                             progress_bar.progress(percent)
                             last_percent=percent
+                        seconds_sf=round(time.time()-stime, 1)
+                        timer_placeholder.caption(f"{seconds_sf}s elapsed ⏱️")
                         time.sleep(0.33)
 
 
@@ -86,12 +87,12 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=1)
         return "ERROR: API key is missing or invalid. Check that your API key is set correctly in the app's secrets, then reload the page.", 0, 0, 0, False
     except anthropic.RateLimitError:
             if attempt==1:
-                return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
+                return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, timer_placeholder, attempt=2)
             return "ERROR: Rate limit hit twice. Wait about a minute, then click Analyze again - this doesn't count against your session limit.", 0, 0, 0, False
 
     except anthropic.APIConnectionError:
         if attempt==1:
-            return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, attempt=2)
+            return ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, timer_placeholder, attempt=2)
         return "ERROR: Could not connect after two tries. Check your internet connection, then click Analyze again.", 0, 0, 0, False
     except Exception as  e:
         return f"ERROR: Something went wrong - {str(e)}. Try rephrasing your input, or click Analyze again in a moment.", 0, 0, 0, False
@@ -178,6 +179,7 @@ Each sentence must have a min. of 10 and a max. of 30 words, NEVER FEWER, NEVER 
 Never use special symbols. Write numbers and percentages in plain text
 
 End with exactly these sections:
+{"### Comparables" + chr(10) + "Name 2 to 3 real, companies or ideas genuinely comparable to " + user_input + " - not vague category peers, but ones close enough that a real number comparison means something. For each, state one concrete number (revenue, growth rate, failure timeline, market share) and how " + user_input + " compares against it directly. If no real comparable exists, say so plainly and explain why this case is unusually novel" + chr(10) + chr(10) if mode=="Extensive" and mode2=="Detailed" else ""}
 ### Vital Metrics
 List the 3 most load-bearing numbers from this entire analysis in one place - the ones that, if wrong, would change the conclusion. Format each as its own numbered line, structured as: **[where it came from]** - the number and why it matters, written as one full sentence, not a fragment. Pull from what's already stated above, nothing new
 
@@ -273,12 +275,11 @@ with col2:
 with col3:
     tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.")
 
-
-
 current_combo=f"{mode}|{mode2}|{tone}"
 if st.session_state.drift is not None and st.session_state.drift!=current_combo:
     st.toast("Settings changed ⚠️")
 st.session_state.drift=current_combo
+
 
 
 
@@ -292,6 +293,7 @@ st.caption(f"Estimated run cost: ~${est_cost:.4f} (actual may vary)")
 st.caption(f"Session cost: ${st.session_state.total_cost:.4f}")
 
 
+
 with st.expander("Session Summary"):
     st.markdown(f"**Total Analysis:** {st.session_state.query_count}/{mqps}")
     st.markdown(f"**Total Cost:** {st.session_state.total_cost:.4f}")
@@ -301,6 +303,7 @@ with st.expander("Session Summary"):
         avg_time=sum(st.session_state.timing_log)/len(st.session_state.timing_log)
         st.markdown(f"**Avg. time per analysis:** {avg_time:.1f}s")
         st.markdown(f"**Individual Times:** {', '.join(f'{t:.1f}s' for t in st.session_state.timing_log)}")
+
 
 col4, col5=st.columns(2)
 with col4:
@@ -326,6 +329,8 @@ with col5:
     if st.button("Dark Mode 🌙" if not st.session_state.dark_mode else "Light Mode ☀️"):
         st.session_state.dark_mode=not st.session_state.dark_mode
         st.rerun()
+
+
 
 
 page_bg=bg_dark if st.session_state.dark_mode else bg_light
@@ -398,6 +403,7 @@ background-color:rgba(255,255,255,0.05); display:flex; align-items:center; justi
 <span style="background-color:{sug_badge}; color:white; padding:2px 10px; border-radius:12px; font-size:0.8em; font-weight:bold;">{sug_type}</span>
 </div>''', unsafe_allow_html=True)
 
+
     use_col, new_col=st.columns(2)
     with use_col:
         if st.button("Use"):
@@ -450,6 +456,7 @@ else:
 
 
 
+
     if st.session_state.get("show_dup_warning"):
         col6, col7=st.columns(2)
         with col6:
@@ -464,12 +471,13 @@ else:
             if st.button("Cancel"):
                 st.session_state.show_dup_warning=False
                 st.session_state.confirm_dup_proceed=False
-                st.rerun()
-        
+                st.rerun()   
     else:
         if st.button(analyze_button_label, disabled=st.session_state.is_running, on_click=handle_analyze):
             pass
         
+
+
 
     if st.session_state.get("pending_warning"):
         st.warning(st.session_state.pending_warning)
@@ -539,19 +547,21 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         placeholder=st.empty()
         with st.spinner("Analyzing..."):
             progress_bar=st.progress(0)
-            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar)
+            timer_placeholder=st.empty()
+            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar, timer_placeholder)
             progress_bar.empty()
-            
+            timer_placeholder.empty()
         st.session_state.is_running=False
         if result and result.startswith("ERROR"):
             placeholder.error(result)
             st.session_state.query_count-=1
             st.stop()
-
         no_tag=["Insight-Seeking Questions", "Vital Metrics", "Weak Point", "The Move"]
         for header_name in no_tag:
             result=re.sub(rf"(### {header_name})\s*\[(Stable|Shifting|Volatile)\]", r"\1", result)
             
+
+
         
         st.toast("Analysis complete ✅")
         if was_cut:
@@ -568,6 +578,8 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         st.session_state.last_banner_type=bannert
         st.session_state.last_banner_color=bannerc
         st.session_state.total_cost=st.session_state.total_cost+call_cost
+
+
         if mode2=="Simplified":
             st.session_state.haiku_count=st.session_state.haiku_count+1
         else:
@@ -576,6 +588,8 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
             st.session_state.company_count=st.session_state.company_count+1
         else:
             st.session_state.idea_count=st.session_state.idea_count+1
+
+
         st.session_state.timing_log.append(elapsed)
         full_label=f"{'Company' if 'Company' in first_line else 'Idea'}: {label}"
         st.session_state.cache[cache_key]=(result, elapsed, final_wc, full_label, call_cost)
@@ -585,7 +599,6 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         st.session_state.last_elapsed=elapsed
         st.session_state.last_cost=call_cost
         st.rerun()
-
 
 
 with st.expander("Session history"):
