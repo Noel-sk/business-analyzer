@@ -129,6 +129,7 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
     highlighted_header_matches=list(re.finditer(r"(?m)^### [^\n\[]+.*", rhighlighted))
     text_pieces=[]
     last_position=0
+    hnames_regen=[]
     for match_index in range(len(highlighted_header_matches)):
         current_match=highlighted_header_matches[match_index]
         body_start=current_match.end()
@@ -140,6 +141,9 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
 
         section_body_trimmed=section_body_html.rstrip()
         trailing_whitespace=section_body_html[len(section_body_trimmed):]
+
+        current_hname=re.sub(r"^### ", "", header_matches[match_index].group(0)).strip()
+        current_hname=re.sub(r"\[(Stable|Shifting|Volatile)\]", "", current_hname).strip()
         text_pieces.append(rhighlighted[last_position:current_match.start()])
         text_pieces.append(current_match.group(0))
         if match_index<len(header_wcs):
@@ -148,6 +152,7 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
             wc_tag=""
         text_pieces.append(section_body_trimmed+wc_tag)
         text_pieces.append(trailing_whitespace)
+        hnames_regen.append(current_hname)
         last_position=body_end
     text_pieces.append(rhighlighted[last_position:])
     rhighlighted="".join(text_pieces)
@@ -155,87 +160,55 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
 
 
     st.markdown(f'<div id="analysis-card" class="done">\n{rhighlighted}\n</div>', unsafe_allow_html=True)
-
     if show_notes:
-        st.session_state.notes[rkey]=st.text_area("**Analysis Notes**", value=st.session_state.notes.get(rkey, ""), key=f"note_{rkey}", placeholder="Write down your notes")
-    st.caption(f"{qcount}/{mqps} analyses used this session.")
-    st.caption(f"Words: {wc}  |  Time: {elapsed_time}s | Model: {model_used} | Cost: ${call_cost:.4f}")
-                            
-
-    if rkey not in st.session_state.trends:
-        try:
-            trend_prompt=f'For "{rlabel}", is general public/media interest currently rising, flat, or declining? Reply with one word. If possible, usea real-time data, if not give a rough guess'
-            trend_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": trend_prompt}])
-            trend_word=trend_response.content[0].text.strip()
-            if trend_word not in ["Rising", "Flat", "Declining"]:
-                trend_word="Unclear"
-            st.session_state.trends[rkey]=trend_word
-        except Exception:
-            st.session_state.trends[rkey]="Unclear"
-    trend_icon={"Rising": "📈", "Flat": "➡️", "Declining": "📉", "Unclear": "❔"}[st.session_state.trends[rkey]]
-    st.caption(f"{trend_icon} Interest trend (rough estimate, not live data): {st.session_state.trends[rkey]}")
+        st.markdown("<div style='height:17px'></div>", unsafe_allow_html=True)
+        if f"show_notes_{rkey}" not in st.session_state:
+            st.session_state[f"show_notes_{rkey}"]=False
+        if st.button("Notes 📝", key=f"notes_btn_{rkey}"):
+            st.session_state[f"show_notes_{rkey}"]=not st.session_state[f"show_notes_{rkey}"]
+        if st.session_state[f"show_notes_{rkey}"]:
+            st.session_state.notes[rkey]=st.text_area("**Analysis Notes**", value=st.session_state.notes.get(rkey, ""), key=f"note_{rkey}", placeholder="Write down your notes")
 
 
-    if st.button("Sanity Check 🔍 (verify no contradictions)", key=f"sanity_btn{rkey}"):
-        try:
-            sanity_prompt=f"Read this business analysis carefully:\n\n{rresult}\n\nCheck wether any section contradicts or conflicts with another section - If you find a contradiction, name the two sections and briefly state the conflict in 3 sentences. If none, reply: 'No contradictions found'"
-            sanity_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=100, messages=[{"role": "user", "content": sanity_prompt}])
-            sanity_result=sanity_response.content[0].text.strip()
-            st.session_state.sanity[rkey]=sanity_result
-        except Exception as sanity_error:
-            st.session_state.sanity[rkey]=f"Couldn't run sanity check: {str(sanity_error)}"
+    newa_col, copy_col, spacer_col=st.columns([1, 1, 5])            
+    with newa_col:
+        if st.button("New analysis 🔄"):
+            st.session_state.last_result=None
+            st.session_state.cached_hit=None
+            st.session_state.analysis_done=False
+            st.session_state.input_key+=1
+            st.session_state.do_focus=True
+            st.rerun()
+    with copy_col:
+        rclean=re.sub(r"###\s*", "", rresult)
+        rclean=re.sub(r"\[.*?\]", "", rclean).strip()
+        st.components.v1.html(f"""<html><body style="margin:0; padding:0; display:flex; align-items:center; justify-content:center; height:40px;">
+<style>#copybtn {{padding:6px 16px; border:2.5px solid {page_text}; border-radius:70px; cursor:pointer; background:transparent; color:{page_text}; transition:transform 0.15s ease, box-shadow 0.15s ease;}}
+#copybtn:hover {{transform:scale(1.11); box-shadow:0 2px 8px rgba(0,0,0,0.2);}}</style>
+<textarea id="copytext" style="display:none;">{rclean}</textarea>
+<button id="copybtn" onclick="navigator.clipboard.writeText(document.getElementById('copytext').value);
+document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='📋';}}, 2300);">📋</button></body></html>""", height=48)
 
-    if rkey in st.session_state.sanity:
-        if st.session_state.sanity[rkey]=="No contradictions found":
-            st.success(f"✅ {st.session_state.sanity[rkey]}")
-        else:
-            st.warning(f"⚠️ {st.session_state.sanity[rkey]}")
+    st.caption(f"**{qcount}/{mqps}** analyses this session | **Words:** {wc}  |  **Time:** {elapsed_time}s | **Model:** {model_used} | **Cost:** ${call_cost:.4f}")
+    
 
-    if rkey not in st.session_state.followups:
-        st.session_state.followups[rkey]=[]
-    if f"show_q{rkey}" not in st.session_state:
-        st.session_state[f"show_q{rkey}"]=False
-    if st.button("Questions❓", key=f"qbtn_{rkey}"):
-        st.session_state[f"show_q{rkey}"]=not st.session_state[f"show_q{rkey}"]
-    if st.session_state[f"show_q{rkey}"]:
-        for past_q, past_a in st.session_state.followups[rkey]:
-            st.markdown(f"**Q:** {past_q}")
-            st.markdown(f"**A:** {past_a}")
-        follow_q=st.text_area("Ask a question about this analysis", key=f"followup_input{rkey}", placeholder="Type your question")
-        if st.button("Ask", key=f"followup_btn{rkey}"):
-            if follow_q.strip():
-                fu_messages=[{"role": "user", "content": f"Here is a business analysis:\n\n{rresult}\n\nAnswer questions about it, stay consistent with its conclusion and don't contradict the analysis"}]
-                fu_messages.append({"role": "assistant", "content": "Understood, ask your question"})
-                for past_q, past_a in st.session_state.followups[rkey]:
-                    fu_messages.append({"role": "user", "content": past_q})
-                    fu_messages.append({"role": "assistant", "content": past_a})
-                fu_messages.append({"role": "user", "content": follow_q})
-                try:
-                    fu_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=300, messages=fu_messages)
-                    fu_answer=fu_response.content[0].text.strip()
-                    st.session_state.followups[rkey].append((follow_q, fu_answer))
-                    st.rerun()
-                except Exception as fu_error:
-                    st.error(f"Couldn't get an answer: {str(fu_error)}")
-                    
-
-    section_matches=re.findall(r"### ([^\n\[]+)", rresult)
-    if section_matches:
+    with st.expander("**Tools** 🛠"):
         regen_meta=st.session_state.entry_meta.get(rkey)
-        if regen_meta:
+        if regen_meta and hnames_regen:
             regen1, regen2=st.columns([3,1])
             with regen1:
-                regen_choice=st.selectbox("Regenerate a section", section_matches, key=f"regen_select{rkey}")
+                regen_choice=st.selectbox("Regenerate a section", hnames_regen, key=f"regen_select_{rkey}")
             with regen2:
-                if st.button("Regenerate", key=f"regen_btn{rkey}"):
+                st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+                if st.button("Regenerate", key=f"regen_btn_{rkey}"):
                     section_pattern=rf"### {re.escape(regen_choice)}.*?(?=\n### |\Z)"
                     old_section=re.search(section_pattern, rresult, re.DOTALL)
                     if old_section:
                         old_section_text=old_section.group(0)
-                        regen_prompt=f"Here is one section from a larger business analysis of {rlabel}:\n\n{old_section_text}\n\nRewrite ONLY this section with fresh wording and possibly new angles. Keep same header, paragraph & sentence count same as the original. Stay consistent with the analysis:\n\n{rresult}\n\nReturn only the rewritten section. Format: '### {regen_choice}'"
+                        regen_prompt=f"Here is one section from a larger business analysis of '{rlabel}': \n\n{old_section_text}\n\nRewrite ONLY this section with fresh wording and possibly new angles. Keep same header, paragraph & sentence count same as the original. Stay consistent with the analysis:\n\n{rresult}\n\nReturn only the rewritten section. Format: '### {regen_choice}'"
                         try:
                             regen_model="claude-sonnet-4-6" if regen_meta["mode2"]=="Detailed" else "claude-haiku-4-5-20251001"
-                            regen_response=client.messages.create(model=regen_model, max_tokens=375, messages=[{"role": "user", "content": regen_prompt}])
+                            regen_response=client.messages.create(model=regen_model, max_tokens=325, messages=[{"role": "user", "content": regen_prompt}])
                             new_section=regen_response.content[0].text.strip()
                             updated_result=rresult.replace(old_section_text, new_section)
                             st.session_state.historyd[rkey]=updated_result
@@ -246,19 +219,70 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
                                 st.session_state.last_result=updated_result
                             st.rerun()
                         except Exception as regen_error:
-                            st.error(f"Couldn't regenerate: {str(regen_error)}")
+                            st.error(f"Couldn't regenerate {str(regen_error)}")
+            st.divider()
 
-    rclean=re.sub(r"###\s*", "", rresult)
-    rclean=re.sub(r"\[.*?\]", "", rclean).strip()
-    st.components.v1.html(f"""<textarea id="copytext" style="display:none;">{rclean}</textarea>
-<button id="copybtn" onclick="navigator.clipboard.writeText(document.getElementById('copytext').value);
-document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{document.getElementById('copybtn').innerText='📋';}}, 2300);"
-style="padding:8px 16px; border-radius:6px; cursor:pointer;">📋</button>""", height=50)
+        if rkey not in st.session_state.trends:
+            try:
+                trend_prompt=f'For "{rlabel}", is general public/media interest currently rising, flat, or declining? Reply with one word. If possible, usea real-time data, if not give a rough guess'
+                trend_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": trend_prompt}])
+                trend_word=trend_response.content[0].text.strip()
+                if trend_word not in ["Rising", "Flat", "Declining"]:
+                    trend_word="Unclear"
+                st.session_state.trends[rkey]=trend_word
+            except Exception:
+                st.session_state.trends[rkey]="Unclear"
+        trend_icon={"Rising": "📈", "Flat": "➡️", "Declining": "📉", "Unclear": "❔"}[st.session_state.trends[rkey]]
+        st.caption(f"{trend_icon} Interest trend (rough estimate, not live data): {st.session_state.trends[rkey]}")
+
+        if st.button("Sanity Check 🔍 (verify no contradictions)", key=f"sanity_btn{rkey}"):
+            try:
+                sanity_prompt=f"Read this business analysis carefully:\n\n{rresult}\n\nCheck wether any section contradicts or conflicts with another section - If so, name the sections and briefly state what each says and the contradiction on a separate line, then verify & state what the right fact(max. 7 sentences). If none, reply: 'No contradictions found'"
+                sanity_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=135, messages=[{"role": "user", "content": sanity_prompt}])
+                sanity_result=sanity_response.content[0].text.strip()
+                st.session_state.sanity[rkey]=sanity_result
+            except Exception as sanity_error:
+                st.session_state.sanity[rkey]=f"Couldn't run sanity check: {str(sanity_error)}"
+        if rkey in st.session_state.sanity:
+            if st.session_state.sanity[rkey]=="No contradictions found":
+                st.success(f"✅ {st.session_state.sanity[rkey]}")
+            else:
+                st.warning(f"⚠️ {st.session_state.sanity[rkey]}")
+
+        st.divider()
+
+        if rkey not in st.session_state.followups:
+            st.session_state.followups[rkey]=[]
+        if f"show_q{rkey}" not in st.session_state:
+            st.session_state[f"show_q{rkey}"]=False
+        if st.button("Questions❓", key=f"qbtn_{rkey}"):
+            st.session_state[f"show_q{rkey}"]=not st.session_state[f"show_q{rkey}"]
+        if st.session_state[f"show_q{rkey}"]:
+            for past_q, past_a in st.session_state.followups[rkey]:
+                st.markdown(f"**Q:** {past_q}")
+                st.markdown(f"**A:** {past_a}")
+            follow_q=st.text_area("Ask a question about this analysis", key=f"followup_input{rkey}", placeholder="Type your question")
+            if st.button("Ask", key=f"followup_btn{rkey}"):
+                if follow_q.strip():
+                    fu_messages=[{"role": "user", "content": f"Here is a business analysis:\n\n{rresult}\n\nAnswer questions about it, stay consistent with its conclusion and don't contradict the analysis"}]
+                    fu_messages.append({"role": "assistant", "content": "Understood, ask your question"})
+                    for past_q, past_a in st.session_state.followups[rkey]:
+                        fu_messages.append({"role": "user", "content": past_q})
+                        fu_messages.append({"role": "assistant", "content": past_a})
+                    fu_messages.append({"role": "user", "content": follow_q})
+                    try:
+                        fu_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=300, messages=fu_messages)
+                        fu_answer=fu_response.content[0].text.strip()
+                        st.session_state.followups[rkey].append((follow_q, fu_answer))
+                        st.rerun()
+                    except Exception as fu_error:
+                        st.error(f"Couldn't get an answer: {str(fu_error)}")
+
 
     
-
-def analyze(user_input, mode, tone, input_type=""):
-    return f"""You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom. {"If analyzing an idea, lead every section with what is most likely to fail and why, with zero softening. Do not balance negatives with positives" if tone=="Brutal" else ""}
+persona_intros={"Contrarian Analyst": "You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom.", "VC Pitch-Deck Skeptic": "You are a venture capital partner who has sat through thousands of pitches and rejected the vast majority. You specifically hunt for the exact weakness that kills a deal, the thing founders hope you won't ask about.", "Industry Insider": "You are a veteran operator who has worked inside this exact industry for over a decade. You focus on the operational, on-the-ground realities that outsiders and analysts consistently miss.", "Burned Founder": "You are a founder whose last company failed. You analyze everything through the lens of your own hard-earned mistakes, constantly pattern-matching this case to what personally went wrong for you before."}
+def analyze(user_input, mode, tone, persona, roast_mode, input_type=""):
+    return f"""{persona_intros[persona]} {"If analyzing an idea, lead every section with what is most likely to fail and why, with zero softening. Do not balance negatives with positives" if tone=="Brutal" else ""}
 Analysis MUST be about {user_input} only. Don't necessarily go over the examples stated below, they are examples to give you an idea
 Maintain one consistent stance throughout - Do not conflict/contradict with previously established statements
 Any claim implying scale, or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words. For each major data claim, briefly note its basis in parentheses: (confirmed public data), (industry estimate), or (inference) - so it's clear how much to trust each figure. Both the '(' & ')' are required every single time you make the claim - never the closing parenthesis without its opening. NEVER mix it with other text
@@ -336,18 +360,29 @@ List the 3 most load-bearing numbers from this entire analysis in one place - fo
 {"State 3 specific action that can be started and produce real signal within 30 days - a small, cheap test that would tell you whether this idea is worth pursuing further or should be set aside for good. If it can't be reached within 30 days(e.g, due to licensing or funding), state so directly and what can be done instead to still get a sense of its potential. State exactly what result from that action would give a clear 'keep going' versus 'best to set it aside', it MUST have a real threshold(number, specific reaction). Min. 8 sentences" if mode=="Extensive" and mode2=="Detailed" else "One specific, concrete action tied directly to the biggest finding in this analysis. If it's a company, one thing to investigate. If it's an idea, one thing to validate before going further. 5-sentence-max"}
 
 ### Execution Sequence
-{"List 6 concrete steps for building this out in the real world, starting from zero - order them by what must happen first. Steps are not limited to findings already stated above; introduce whatever practical fundamentals apply. Do not repeat the test from 'Ways 2 Validate' as a step - this sequence assumes it already passed 'Ways 2 Validate'. Don't include infrastructure the person would not realistically have at this stage. Reply format: '[1] first step'" if mode=="Extensive" and mode2=="Detailed" else "List 4 concrete steps for building this out in the real world, starting from zero - Order them by what must happen first. Steps are not limited to findings already stated above; introduce whatever practical fundamentals apply. Do not repeat the test from 'Ways 2 Validate' as a step - this sequence assumes it already passed 'Ways 2 Validate'. Don't include infrastructure the person would not realistically have at this stage"}"""
+{"List 6 concrete steps for building this out in the real world, starting from zero - order them by what must happen first. Steps are not limited to findings already stated above; introduce whatever practical fundamentals apply. Do not repeat the test from 'Ways 2 Validate' as a step - this sequence assumes it already passed 'Ways 2 Validate'. Don't include infrastructure the person would not realistically have at this stage. Reply format: '[1] first step'" if mode=="Extensive" and mode2=="Detailed" else "List 4 concrete steps for building this out in the real world, starting from zero - Order them by what must happen first. Steps are not limited to findings already stated above; introduce whatever practical fundamentals apply. Do not repeat the test from 'Ways 2 Validate' as a step - this sequence assumes it already passed 'Ways 2 Validate'. Don't include infrastructure the person would not realistically have at this stage"}
 
+{"### Roast" + chr(10) + "In one unhinged, maximally blunt paragraph, roast this " + user_input + " as harshly as possible - no hedging, no fairness, no balance. Say the single most brutal, gut-check thing a ruthless critic would actually say out loud. This is separate from the formal analysis above and does not need to stay professional. Absolutely everything MUST stay factual. Take this as a grounding, reality checking paragraph. Max 8 sentences divided in 2 paragraphs" if roast_mode else ""}"""
 
 
 st.set_page_config(page_title="Business Analyzer", page_icon="📊", layout="wide")
-st.title("Business Analyzer 📊 ")
+st.title("Business Analyzer")
 st.markdown("<p style='text-align: center; color: gray; font-size: 0.9em;'>Drop a company or idea, get it analyzed thoroughly</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size:2.2em; margin-top:-10px;'>📊</p>", unsafe_allow_html=True)
 st.markdown('<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">', unsafe_allow_html=True)
 st.markdown("""<style> html, body, [class*="css"] {font-family: 'Inter', sans-serif;}
 h1 {text-align: center;}</style>""", unsafe_allow_html=True)
-st.markdown("""<style>div[data-testid="stButton"] button { transition: transform 0.15s ease, box-shadow 0.15s ease;}
-div[data-testid="stButton"] button:hover {transform: scale(1.11); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}</style>""", unsafe_allow_html=True)
+
+st.markdown("""<style>div[data-testid="stButton"] button {transition:transform 0.15s ease, box-shadow 0.15s ease;}
+div[data-testid="stButton"] button:hover {transform: scale(1.11); box-shadow: 0 2px 8px rgba(0,0,0,0.2);}
+div[data-testid="stTextInput"] {border:1px solid #555 !important; border-radius:6px !important; background-color:rgba(255,255,255,0.05) !important; padding:0 !important;}
+div[data-testid="stTextInput"] div[data-baseweb="input"] {border:none !important; box-shadow:none !important; background-color:transparent !important; padding:0 !important; min-height:96px !important;}
+div[data-testid="stTextInput"] div[data-baseweb="base-input"] {border:none !important; box-shadow:none !important; background-color:transparent !important;}
+div[data-testid="stTextInput"] input {border:none !important; box-shadow:none !important; background-color:transparent !important; padding:8px 12px !important; height:100% !important;}
+div[data-testid="stTextInput"] div[data-baseweb="base-input"] {display:flex !important; align-items:center !important;}
+div[data-testid="stSelectbox"] {max-width:250px !important;}
+div[data-testid="stSelectbox"] * {cursor:default !important;}
+div[data-testid="stSelectbox"] input {pointer-events:none !important; caret-color:transparent !important;}</style>""", unsafe_allow_html=True)
 
 st.divider()
 st.markdown(f"""<style> #analysis-card {{border:3px solid {colorcard_orange}; border-radius:10px; padding:20px; transition:border-color 3.5s; animation:fadeIn 1.0s ease-in;}}
@@ -429,11 +464,14 @@ if st.session_state.psugs:
 
 col1, col2, col3=st.columns(3)
 with col1:
-    mode=st.radio("Structure", ["Brief", "Extensive"], horizontal=True, help="**Brief**: short & focused. **Extensive**: longer, multi-angle breakdown.")
+    mode=st.radio("Structure", ["Brief", "Extensive"], horizontal=True, help="**Brief**: short & focused. **Extensive**: longer, multi-angle breakdown.", disabled=st.session_state.is_running)
 with col2:
-    mode2=st.radio("Configuration", ["Simplified", "Detailed"], horizontal=True, help="**Simplified** uses 'Haiku' (faster, lighter). **Detailed** uses 'Sonnet' (slower, sharper reasoning).")
+    mode2=st.radio("Configuration", ["Simplified", "Detailed"], horizontal=True, help="**Simplified** uses 'Haiku' (faster, lighter). **Detailed** uses 'Sonnet' (slower, sharper reasoning).", disabled=st.session_state.is_running)
 with col3:
-    tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.")
+    tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.", disabled=st.session_state.is_running)
+
+persona=st.selectbox("Analyst Persona", ["Contrarian Analyst", "VC Pitch-Deck Skeptic", "Industry Insider", "Burned Founder"], help="Changes the analyst's voice and focus - **Contrarian Analyst:** default balanced skepticism. **VC Skeptic:** hunts for what kills a pitch. **Industry Insider:** focuses on operational/on-the-ground realities. **Burned Founder:** writes from hard personal failure experience, pattern-matches to past mistakes.", disabled=st.session_state.is_running)
+roast_mode=st.checkbox("Add a Roast 🔥", help="Appends one unhinged, maximally blunt paragraph at the end - separate from the formal analysis", disabled=st.session_state.is_running)
 
 current_combo=f"{mode}|{mode2}|{tone}"
 if st.session_state.drift is not None and st.session_state.drift!=current_combo:
@@ -451,18 +489,6 @@ else:
     est_cost=(est_input*scpt)+(est_output*sopt)
 st.caption(f"Estimated run cost: ~${est_cost:.4f} (actual may vary)")
 st.caption(f"Session cost: ${st.session_state.total_cost:.4f}")
-
-
-
-with st.expander("Session Summary"):
-    st.markdown(f"**Total Analysis:** {st.session_state.query_count}/{mqps}")
-    st.markdown(f"**Total Cost:** {st.session_state.total_cost:.4f}")
-    st.markdown(f"**Model Split:** Haiku, ({st.session_state.haiku_count}). Sonnet, ({st.session_state.sonnet_count})")
-    st.markdown(f"**Type Split:** Company, ({st.session_state.company_count}). Idea, ({st.session_state.idea_count})")
-    if st.session_state.timing_log:
-        avg_time=sum(st.session_state.timing_log)/len(st.session_state.timing_log)
-        st.markdown(f"**Avg. time per analysis:** {avg_time:.1f}s")
-        st.markdown(f"**Individual Times:** {', '.join(f'{t:.1f}s' for t in st.session_state.timing_log)}")
 
 
 col4, col5=st.columns(2)
@@ -501,6 +527,8 @@ st.markdown(f"""<style> .stApp {{background-color:{page_bg}; color:{page_text};}
 div[data-testid="stButton"] button {{background-color:{page_bg}; color:{page_text}; border:1px solid {page_text};}}
 div[data-testid="stExpander"] {{background-color:{page_bg} !important;}}
 div[data-testid="stExpander"] * {{background-color:transparent !important; color:{page_text} !important;}}
+div[data-testid="stExpander"] div[data-testid="stHorizontalBlock"] > div:first-child {{border-right:1px solid {divider_color}; padding-right:20px;}}
+div[data-testid="stExpander"] div[data-testid="stHorizontalBlock"] > div:last-child {{padding-left:20px;}}
 hr {{border-color:{divider_color} !important;}}</style>""", unsafe_allow_html=True)
 
 
@@ -543,9 +571,10 @@ def handle_analyze():
 
 
 
-input_col, sugs_col=st.columns([4,1.3])
+input_col, sugs_col=st.columns([3,2])
 with input_col:
-    user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze)
+    st.markdown("**Input**")
+    user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze, label_visibility="collapsed")
     st.caption(f"{len(user_input)}/100 characters")  
     if st.session_state.get("do_focus"):
         st.components.v1.html("""<script> var inputs=window.parent.document.querySelectorAll('input[type="text"]');
@@ -554,12 +583,17 @@ if(inputs.length>0){inputs[inputs.length-1].focus();} </script>""", height=0)
 
 with sugs_col:
     examples=[("Airbnb", "Company"), ("AI-automated Air Traffic Controller System", "Idea"), ("SaaS For Bio-Engineers", "Idea"), ("Adidas", "Company"), ("Subscription Meal Kits", "Idea"), ("Equinox", "Company"), ("Corporate Meditation Studios", "Idea")]
-    def fresh_sugs(current_name):
+    def fresh_sugs(current_name, filter_choice):
         try:
-            next_type="Idea" if st.session_state.sug_last=="Company" else "Company"
+            if filter_choice=="Company":
+                next_type="Company"
+            elif filter_choice=="Idea":
+                next_type="Idea"
+            else:
+                next_type="Idea" if st.session_state.sug_last=="Company" else "Company"
             avoid_list=", ".join(st.session_state.sugs_seen[-8:])
 
-            sug_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=15, messages=[{"role": "user", "content": f'Give one real {"well-known company" if next_type=="Company" else "interesting uncommon business idea(e.g. SaaS for Bio-Engineers)(be creative, but stay realistic & grounded)"} different from "{current_name}". Reply format: "{"Company: name" if next_type=="Company" else "Idea: 2 to 8 word label"}"'}])
+            sug_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=15, messages=[{"role": "user", "content": f'Give one real {"well-known company" if next_type=="Company" else "interesting uncommon business idea(e.g. SaaS for Bio-Engineers. Do NOT make it about the same category(e.g. AI-powered))(be creative, but stay realistic & grounded)"}. Do not repeat any of these already shown: {avoid_list}. Reply format: "{"Company: name" if next_type=="Company" else "Idea: 2 to 8 word label"}"'}])
             sug_text=sug_response.content[0].text.strip()
             if sug_text.startswith("Company:"):
                  new_name=sug_text.replace("Company:", "").strip()
@@ -568,17 +602,18 @@ with sugs_col:
                 new_name=sug_text.replace("Idea:", "").strip()
                 new_type="Idea"
             else:
-                new_name, new_type=random.choice(examples)
+                filtered_examples=[e for e in examples if filter_choice=="Random" or e[1]==filter_choice]
+                new_name, new_type=random.choice(filtered_examples)
             st.session_state.sugs_seen.append(new_name)
             st.session_state.sug_last=new_type
             return (new_name, new_type)
         except Exception:
-            return random.choice(examples)
+            filtered_examples=[e for e in examples if filter_choice=="Random" or e[1]==filter_choice]
+            return random.choice(filtered_examples)
         
     sug_name=st.session_state.sugs[0]
     sug_type=st.session_state.sugs[1]
     sug_badge=color_company if sug_type=="Company" else color_idea
-
 
     st.markdown("**Inspiration Panel**")
     st.markdown(f'''<div style="border:1px solid #555; border-radius:6px; padding:8px 12px; margin-bottom:14px;
@@ -586,19 +621,21 @@ background-color:rgba(255,255,255,0.05); display:flex; align-items:center; justi
 <span style="background-color:{sug_badge}; color:white; padding:2px 10px; border-radius:12px; font-size:0.8em; font-weight:bold;">{sug_type}</span>
 </div>''', unsafe_allow_html=True)
 
+    sug_filter=st.radio("Filter", ["Random", "Company", "Idea"], horizontal=True, label_visibility="collapsed", key="sug_filter", disabled=st.session_state.is_running)
+
 
     use_col, new_col=st.columns(2)
     with use_col:
-        if st.button("Use"):
+        if st.button("Use", disabled=st.session_state.is_running):
             st.session_state.psugs=st.session_state.sugs[0]
             st.session_state.do_focus=True
             st.rerun()
     with new_col:
-        if st.button("New"):
-            st.session_state.sugs=fresh_sugs(st.session_state.sugs[0])
+        if st.button("New", disabled=st.session_state.is_running):
+            st.session_state.sugs=fresh_sugs(st.session_state.sugs[0], sug_filter)
             st.rerun()
-    if st.button("Surprise Me"):
-        st.session_state.sugs=fresh_sugs(st.session_state.sugs[0])
+    if st.button("Surprise Me", disabled=st.session_state.is_running):
+        st.session_state.sugs=fresh_sugs(st.session_state.sugs[0], sug_filter)
         st.session_state.psugs=st.session_state.sugs[0]
         st.session_state.do_focus=True
         st.rerun()
@@ -625,7 +662,6 @@ if st.session_state.query_count>=mqps:
 else:
     if st.session_state.query_count==mqps-1:
         st.warning(f"Last analysis this session ⚠️ ({st.session_state.query_count+1}/{mqps})")
-
     if st.session_state.get("show_dup_warning") and st.session_state.get("confirm_dup_proceed"):
         analyze_button_label="Confirm Analyze Anyway"
     elif st.session_state.get("show_dup_warning"):
@@ -687,7 +723,7 @@ else:
         render_analysis_card(st.session_state.last_label, st.session_state.last_key, st.session_state.last_result, st.session_state.last_banner_type, st.session_state.last_banner_color, st.session_state.last_qcount, st.session_state.last_wc, st.session_state.last_elapsed, st.session_state.last_model, st.session_state.last_cost)
         if st.session_state.get("last_cut"):
             if st.button("Extend ⏩(continue where it cut off)"):
-                extend_prompt=f"This business analyis was cut off before finishing:\n\n{st.session_state.last_result}\n\nContinue EXACTLY where it left off - do NOT repeat any part, restart, add new opening. Pick up mid-sentence or mid-section and keep going until analysis is properly complete, ending with 'Execution Sequence'"
+                extend_prompt=f"This business analyis was cut off before finishing:\n\n{st.session_state.last_result}\n\nContinue EXACTLY where it left off - do NOT repeat any part, restart, add new opening. Pick up mid-sentence or mid-section and keep going until analysis is properly complete, ending with '### Roast' if that section was requested, otherwise ending with 'Execution Sequence'"
                 try:
                     extend_model="claude-sonnet-4-6" if st.session_state.entry_meta[st.session_state.last_key]["mode2"]=="Detailed" else "claude-haiku-4-5-20251001"
                     extend_response=client.messages.create(model=extend_model, max_tokens=300, messages=[{"role": "user", "content": extend_prompt}])
@@ -702,15 +738,8 @@ else:
                     st.rerun()
                 except Exception as extend_error:
                     st.error(f"Couldn't extend: {str(extend_error)}")
-                    
 
-        if st.button(" New analysis 🔄"):
-            st.session_state.last_result=None
-            st.session_state.cached_hit=None
-            st.session_state.analysis_done=False
-            st.session_state.input_key+=1
-            st.session_state.do_focus=True
-            st.rerun()
+
     if st.session_state.is_running:
         cleaned_input=st.session_state.pending_input
 
@@ -748,7 +777,7 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         with st.spinner("Analyzing..."):
             progress_bar=st.progress(0)
             timer_placeholder=st.empty()
-            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, first_line), placeholder, mode2, mode, progress_bar, timer_placeholder)
+            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, persona, roast_mode, first_line), placeholder, mode2, mode, progress_bar, timer_placeholder)
             progress_bar.empty()
             timer_placeholder.empty()
         st.session_state.is_running=False
@@ -756,7 +785,22 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
             placeholder.error(result)
             st.session_state.query_count-=1
             st.stop()
-        no_tag=["Insight-Seeking Questions", "Vital Metrics", "Fragile Assumptions", "Ways 2 Validate", "Execution Sequence", "Comparables"]
+
+
+        if was_cut:
+            try:
+                auto_extend_prompt=f"This business analysis was cut off before finishing:\n\n{result}\n\nContinue EXACTLY where it left off and finish it. Do NOT repeat, restart or add something new. {'End with a ### Roast section.' if roast_mode else \"End with the 'Execution Sequence' section.\"}"
+                auto_extend_model="claude-sonnet-4-6" if mode2=="Detailed" else "claude-haiku-4-5-20251001"
+                auto_extend_response=client.messages.create(model=auto_extend_model, max_tokens=300, messages=[{"role": "user", "content": auto_extend_prompt}])
+                auto_extend_text=auto_extend_response.content[0].text.strip()
+                result=result+"\n\n"+auto_extend_text
+                final_wc=len(result.split())
+                was_cut=False
+            except Exception:
+                pass
+
+
+        no_tag=["Insight-Seeking Questions", "Vital Metrics", "Fragile Assumptions", "Ways 2 Validate", "Execution Sequence", "Comparables", "Roast"]
         for header_name in no_tag:
             result=re.sub(rf"(### {header_name})\s*\[(Stable|Shifting|Volatile)\]", r"\1", result)
             
@@ -802,42 +846,54 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         st.rerun()
 
 
-with st.expander("Session history"):
-    if st.session_state.history_keys:
-        display_to_key={}
-        for k in st.session_state.history_keys:
-            m=st.session_state.entry_meta[k]
-            disp=f"{m['label']} **({m['mode']}/{m['mode2']}/{m['tone']})**"
-            display_to_key[disp]=k
-        selected_disp=st.radio("Past Analyses:", ["- select 2 view -"] + list(display_to_key.keys()), key="history_select")
-
-        if selected_disp and selected_disp != "- select 2 view -":
-            sel_key=display_to_key[selected_disp]
-            sel_result=st.session_state.historyd[sel_key]
-            sel_meta=st.session_state.entry_meta[sel_key]
-            sel_cached=st.session_state.cache.get(sel_key)
-            if sel_cached:
-                sel_full=sel_cached[3]
-                sel_type, sel_name=sel_full.split(": ", 1) if ": " in sel_full else ("Company", sel_full)
-                sel_color=color_company if sel_type=="Company" else color_idea
-                render_analysis_card(sel_name, sel_key, sel_result, sel_type, sel_color, st.session_state.query_count, sel_cached[2], sel_cached[1], "Sonnet" if sel_meta["mode2"]=="Detailed" else "Haiku", sel_cached[4])
-            else:
-                st.warning("Full details for this entry weren't cached - showing basic text only")
-                st.markdown(sel_result.split("\n", 1)[1] if "\n" in sel_result else sel_result)
-        else: 
-            st.caption("Select an analysis above to view it")
-    else:
-        st.markdown(f"""<div style="text-align:center; padding:30px 10px; color:{colorcard_orange}; opacity:0.6;">
-No analysis yet</div>""", unsafe_allow_html=True)
-
-
-with st.expander("About this tool"):
-    st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
+with st.expander("**About & Session History**"):
+    about_col, hist_col=st.columns(2)
+    with about_col:
+        st.markdown("""**Business Analyzer** uses AI to break down companies and business ideas beyond surface-level takes.
 
 **How 2 Use:**
-- Type a company name or business idea and hit 'Analyze'.
-- **Brief** mode gives you the sharpest single insight per section. **Extensive** mode goes deeper with multiple angles per section.
-- **Simplified** is faster and less acute. **Detailed** is slower but sharper.
-- **Neutral** mode limits judgment. **Brutal** mode adds an extra judgment lens.
+- Type a company name or business idea and hit '**Analyze**'
+- **Brief** mode gives you a single insight per section. **Extensive** mode goes deeper with multiple angles per section
+- **Simplified** is faster and less acute. **Detailed** is slower but sharper
+- **Neutral** mode limits judgment. **Brutal** mode adds an extra judgment lens
 
 **Limit:** 3 analysis per session, refresh to reset.""")
+    with hist_col:
+        st.markdown("**Session History**")
+        if st.session_state.history_keys:
+            display_to_key={}
+            for k in st.session_state.history_keys:
+                m=st.session_state.entry_meta[k]
+                disp=f"{m['label']} **({m['mode']}/{m['mode2']}/{m['tone']})**"
+                display_to_key[disp]=k
+            selected_disp=st.radio("Past Analyses:", ["- select 2 view -"] + list(display_to_key.keys()), key="history_select")
+
+            if selected_disp and selected_disp != "- select 2 view -":
+                sel_key=display_to_key[selected_disp]
+                sel_result=st.session_state.historyd[sel_key]
+                sel_meta=st.session_state.entry_meta[sel_key]
+                sel_cached=st.session_state.cache.get(sel_key)
+                if sel_cached:
+                    sel_full=sel_cached[3]
+                    sel_type, sel_name=sel_full.split(": ", 1) if ": " in sel_full else ("Company", sel_full)
+                    sel_color=color_company if sel_type=="Company" else color_idea
+                    render_analysis_card(sel_name, sel_key, sel_result, sel_type, sel_color, st.session_state.query_count, sel_cached[2], sel_cached[1], "Sonnet" if sel_meta["mode2"]=="Detailed" else "Haiku", sel_cached[4])
+                else:
+                    st.warning("Full details for this entry weren't cached - showing basic text only")
+                    st.markdown(sel_result.split("\n", 1)[1] if "\n" in sel_result else sel_result)
+            else: 
+                st.caption("Select an analysis above to view it")
+        else:
+            st.markdown(f"""<div style="display:flex; align-items:center; justify-content:center; min-height:250px; text-align:center;
+padding:0 10%; color:{colorcard_orange}; opacity:0.6;"> No analysis yet</div>""", unsafe_allow_html=True)
+
+with st.expander("**Session Summary**"):
+    st.markdown(f"**Total Analysis:** {st.session_state.query_count}/{mqps}")
+    st.markdown(f"**Total Cost:** {st.session_state.total_cost:.4f}")
+    st.markdown(f"**Model Split:** Haiku, ({st.session_state.haiku_count}). Sonnet, ({st.session_state.sonnet_count})")
+    st.markdown(f"**Type Split:** Company, ({st.session_state.company_count}). Idea, ({st.session_state.idea_count})")
+    if st.session_state.timing_log:
+        avg_time=sum(st.session_state.timing_log)/len(st.session_state.timing_log)
+        st.markdown(f"**Avg. time per analysis:** {avg_time:.1f}s")
+        st.markdown(f"**Individual Times:** {', '.join(f'{t:.1f}s' for t in st.session_state.timing_log)}")
+
