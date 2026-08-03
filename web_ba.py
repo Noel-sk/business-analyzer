@@ -29,8 +29,8 @@ bg_light="#ffffff"
 bg_dark="#0e1117"
 text_light="#000000"
 text_dark="#fafafa"
-maxt_br=2950
-maxt_ex=4350
+maxt_br=3050
+maxt_ex=4450
 
 def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, timer_placeholder, attempt=1):
     targetw=1850 if mode=="Brief" else 2325
@@ -79,9 +79,9 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, timer_plac
             
             placeholder.markdown(f'<div id="analysis-card" class="done">\n{display_text}\n</div>', unsafe_allow_html=True)
             elapsed=round(time.time()-stime, 1)
-            time.sleep(3.7)
+            time.sleep(3.5)
             final_wc=len(full_text.split())
-            was_cut=final_wc<(targetw*0.8)
+            was_cut=final_wc<(targetw*0.9)
             return full_text, elapsed, final_wc, call_cost, was_cut
 
     except anthropic.AuthenticationError:
@@ -281,15 +281,15 @@ document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{docum
 
     
 persona_intros={"Contrarian Analyst": "You are a contrarian business analyst with deep field experience. You prioritize uncomfortable truths over conventional wisdom.", "VC Pitch-Deck Skeptic": "You are a venture capital partner who has sat through thousands of pitches and rejected the vast majority. You specifically hunt for the exact weakness that kills a deal, the thing founders hope you won't ask about.", "Industry Insider": "You are a veteran operator who has worked inside this exact industry for over a decade. You focus on the operational, on-the-ground realities that outsiders and analysts consistently miss.", "Burned Founder": "You are a founder whose last company failed. You analyze everything through the lens of your own hard-earned mistakes, constantly pattern-matching this case to what personally went wrong for you before."}
-def analyze(user_input, mode, tone, persona, roast_mode, input_type=""):
+def analyze(user_input, mode, tone, persona, roast_mode, familiarity, input_type=""):
     return f"""{persona_intros[persona]} {"If analyzing an idea, lead every section with what is most likely to fail and why, with zero softening. Do not balance negatives with positives" if tone=="Brutal" else ""}
 Analysis MUST be about {user_input} only. Don't necessarily go over the examples stated below, they are examples to give you an idea
 Maintain one consistent stance throughout - Do not conflict/contradict with previously established statements
 Any claim implying scale, or data (revenue, market size, failure rates, growth) must include an approximate real number or range - never vague words. For each major data claim, briefly note its basis in parentheses: (confirmed public data), (industry estimate), or (inference) - so it's clear how much to trust each figure. Both the '(' & ')' are required every single time you make the claim - never the closing parenthesis without its opening. NEVER mix it with other text
 Immediately after each header's text, on the exact same line, append either: '[Stable]', '[Shifting]', or '[Volatile]' - based on how fast that factor changes in the real world, no explanation. ONLY add it where it makes a difference(not on e.g, Insight-Seeking Questions)
 
-Immediately after the opening [Company:] or [Idea:] line and blank line, before the first '### header', state the general base rate for this category - how often businesses or ideas like this one actually succeed or fail in the real world, using an approximate percentage or fraction. In the same paragraph, state specifically how this case compares to that baseline and why. This paragraph is separate from all limits
-In a separate unlabeled paragraph immediately after the base rate paragraph, state one to two specific, observable real-world signals that would indicate this analysis's core conclusion needs to be revised - concrete things a person could actually notice happening, not vague warnings. State early enough that noticing them still leaves time to change course based on the correction. This paragraph is also separate from all limits
+Immediately after the opening [Company:] or [Idea:] line and blank line, before the first '### header', state the general base rate for this category - how often businesses or ideas like this one actually succeed or fail in the real world, using an approximate percentage or fraction. In the same paragraph, state specifically how this case compares to that baseline and why. This paragraph is separate from all limits. {"This is a well-known company - you may cite specific real financial/operational facts about it with normal confidence" if familiarity=="Well-known" else "This is a lesser-known/obscure company - hedge more, lean toward more claims as (inference) rather than (confirmed public data), since detailed reliable information is less available" if familiarity=="Obscure" else ""}
+In a separate unlabeled paragraph immediately after the base rate paragraph, state one to two specific, observable real-world signals that would indicate this analysis's core conclusion needs to be revised - concrete things a person could actually notice happening, not vague warnings. State early enough that noticing them still leaves time to change course based on the correction. This paragraph is separate from all limits
 
 if company, cover each header in order:
 ### Revenue Structure
@@ -533,12 +533,13 @@ hr {{border-color:{divider_color} !important;}}</style>""", unsafe_allow_html=Tr
 
 
 def handle_analyze():
+    st.session_state.sharpen_decided=False
     pending_input=st.session_state[f"input_{st.session_state.input_key}"].strip()
     if not pending_input:
         st.session_state.pending_warning="Please enter something."
         st.session_state.show_dup_warning=False
-    elif len(pending_input)>100:
-        st.session_state.pending_warning="Input 2 long, please keep under 100 characters."
+    elif len(pending_input)>150:
+        st.session_state.pending_warning="Input 2 long, please keep under 150 characters."
         st.session_state.show_dup_warning=False                   
     else:
         st.session_state.pending_warning=None
@@ -575,7 +576,7 @@ input_col, sugs_col=st.columns([3,2])
 with input_col:
     st.markdown("**Input**")
     user_input=st.text_input("Input", key=f"input_{st.session_state.input_key}", on_change=handle_analyze, label_visibility="collapsed")
-    st.caption(f"{len(user_input)}/100 characters")  
+    st.caption(f"{len(user_input)}/150 characters")  
     if st.session_state.get("do_focus"):
         st.components.v1.html("""<script> var inputs=window.parent.document.querySelectorAll('input[type="text"]');
 if(inputs.length>0){inputs[inputs.length-1].focus();} </script>""", height=0)
@@ -746,12 +747,55 @@ else:
 
         
         with st.spinner("Recognizing..."):
-            peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'"{cleaned_input}": company or a business idea? Reply exactly: [Company: name] or [Idea: 2-5 word label]'}])
-            first_line=peek.content[0].text.strip()
+            recog_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'"{cleaned_input}": company or a business idea? Reply exactly: [Company: name] or [Idea: 2-5 word label]'}])
+            first_line=recog_response.content[0].text.strip()
+
+            familiarity=None
+            if "Company" in first_line:
+                try:
+                    fam_response=client.messages.create(model="claude-haiku-4-20251001", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a well-known familiar company or is it an obscure not famous company? Reply EXACTLY: "Well-known" or "Obscure"'}])
+                    fam_text=fam_response.content[0].text.strip()
+                    familiarity=fam_text if fam_text in ["Well-known", "Obscure"] else "Obscure"
+                except Exception:
+                    familiarity="Obscure"
+                                                         
         if "Company"  not in first_line and "Idea" not in first_line:
             st.warning("Couldn't recognize input type. Try rephrasing.")
             st.session_state.is_running=False
             st.stop()
+
+        if not st.session_state.get("sharpen_decided"):
+            try:
+                sharpen_peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'Is "{cleaned_input}" vague enough to benefit from a sharper, more specific framing before analysis? If yes, reply EXACTLY: "Sharper: [better framing]". If it is already specific enough, reply EXACTLY: "Clear"'}])
+                sharpen_text=sharpen_peek.content[0].text.strip()
+                if sharpen_text.startswith("Sharper:"):
+                    st.session_state.sharpen_suggestion=sharpen_text.replace("Sharper:", "").strip()
+                else:
+                    st.session_state.sharpen_suggestion=None
+            except Exception:
+                st.session_state.sharpen_suggestion=None
+
+            if st.session_state.sharpen_suggestion:
+                st.session_state.is_running=False
+                st.info(f"Sharper framing available: **{st.session_state.sharpen_suggestion}**")
+                sharp_col1, sharp_col2, inv1=st.columns([2, 2, 5])
+                with sharp_col1:
+                    if st.button("Use sharper framing"):
+                        st.session_state.pending_input=st.session_state.sharpen_suggestion
+                        st.session_state.sharpen_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                with sharp_col2:
+                    if st.button("Keep original"):
+                        st.session_state.sharpen_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                    st.stop()
+            else:
+                st.session_state.sharpen_decided=True
+        
+
+
         st.markdown("""<style>@keyframes recognizeFade{from{opacity: 0;} to {opacity: 1;}} #recognize-msg{animation:recognizeFade 1.9s ease-in;}</style>""", unsafe_allow_html=True)
         if "Company" in first_line:                                                                                          
             label=first_line.replace("[Company:", "").replace("]", "").strip()
@@ -777,7 +821,7 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
         with st.spinner("Analyzing..."):
             progress_bar=st.progress(0)
             timer_placeholder=st.empty()
-            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, persona, roast_mode, first_line), placeholder, mode2, mode, progress_bar, timer_placeholder)
+            result, elapsed, final_wc, call_cost, was_cut=ask_claude_stream(analyze(cleaned_input, mode, tone, persona, roast_mode, familiarity, first_line), placeholder, mode2, mode, progress_bar, timer_placeholder)
             progress_bar.empty()
             timer_placeholder.empty()
         st.session_state.is_running=False
@@ -789,7 +833,8 @@ div[data-testid="stSpinner"] p {{font-family:'Inter', sans-serif; color:{page_te
 
         if was_cut:
             try:
-                auto_extend_prompt=f"This business analysis was cut off before finishing:\n\n{result}\n\nContinue EXACTLY where it left off and finish it. Do NOT repeat, restart or add something new. {'End with a ### Roast section.' if roast_mode else \"End with the 'Execution Sequence' section.\"}"
+                extend_ending="End with the 'Roast' section" if roast_mode else "End with the 'Execution Sequence' section"
+                auto_extend_prompt=f"This business analysis was cut off before finishing:\n\n{result}\n\nContinue EXACTLY where it left off and finish it. Do NOT repeat, restart or add something new. {extend_ending}"
                 auto_extend_model="claude-sonnet-4-6" if mode2=="Detailed" else "claude-haiku-4-5-20251001"
                 auto_extend_response=client.messages.create(model=auto_extend_model, max_tokens=300, messages=[{"role": "user", "content": auto_extend_prompt}])
                 auto_extend_text=auto_extend_response.content[0].text.strip()
