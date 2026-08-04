@@ -101,18 +101,21 @@ def ask_claude_stream(prompt, placeholder, mode2, mode, progress_bar, timer_plac
 
 
 def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcount, wc, elapsed_time, model_used, call_cost=0, show_notes=True):
-    st.markdown(f'<div id="recognize-msg" style="background-color:{banner_color}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{banner_type}: {rlabel}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div id="recognize-msg" style="background:linear-gradient(135deg, {banner_color} 0%, {banner_color}cc 100%); color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{banner_type}: {rlabel}</div>', unsafe_allow_html=True)
     st.divider()
-    
+
     rdisplay=rresult.split("\n", 1)[1] if "\n" in rresult else rresult
     rdisplay="\n".join(line.lstrip() for line in rdisplay.split("\n"))
-    rhighlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion)?)', rf'<span style="background-color:{color_highlight}; padding:1px 4px; border-radius:3px;">\1</span>', rdisplay)
+    rhighlighted=rdisplay
+    risk_headers=["Weak Point", "Fragile Assumptions", "Underlying Threat", "Out Of Sight Risks", "Devil's Advocate", "Roast"]
+    
+    
     rhighlighted=rhighlighted.replace("[Stable]", f'<span style="color:{colorcard_green};">[Stable]</span>')
     rhighlighted=rhighlighted.replace("[Shifting]", f'<span style="color:{color_shifting};">[Shifting]</span>')
     rhighlighted=rhighlighted.replace("[Volatile]", f'<span style="color:{color_volatile};">[Volatile]</span>')
-    rhighlighted=rhighlighted.replace("(confirmed public data)", f'<span style="color:{colorcard_green};">(confirmed public data)</span>')
-    rhighlighted=rhighlighted.replace("(industry estimate)", f'<span style="color:{color_shifting};">(industry estimate)</span>')
-    rhighlighted=rhighlighted.replace("(inference)", f'<span style="color:{color_volatile};">(inference)</span>')
+    rhighlighted=re.sub(r"\(confirmed public data\)", f'<span style="color:{colorcard_green};">(confirmed public data)</span>', rhighlighted, flags=re.IGNORECASE)
+    rhighlighted=re.sub(r"\(industry estimate\)", f'<span style="color:{color_shifting};">(industry estimate)</span>', rhighlighted, flags=re.IGNORECASE)
+    rhighlighted=re.sub(r"\(inference\)", f'<span style="color:{color_volatile};">(inference)</span>', rhighlighted, flags=re.IGNORECASE)
 
 
     header_matches=list(re.finditer(r"(?m)^### [^\n\[]+.*", rresult))
@@ -138,7 +141,6 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
         else:
             body_end=len(rhighlighted)
         section_body_html=rhighlighted[body_start:body_end]
-
         section_body_trimmed=section_body_html.rstrip()
         trailing_whitespace=section_body_html[len(section_body_trimmed):]
 
@@ -146,12 +148,22 @@ def render_analysis_card(rlabel, rkey, rresult, banner_type, banner_color, qcoun
         current_hname=re.sub(r"\[(Stable|Shifting|Volatile)\]", "", current_hname).strip()
         text_pieces.append(rhighlighted[last_position:current_match.start()])
         text_pieces.append(current_match.group(0))
+
         if match_index<len(header_wcs):
             wc_tag=f'<span style="color:#888; font-size:0.85em;"> ({header_wcs[match_index]}w)</span>'
         else:
             wc_tag=""
-        text_pieces.append(section_body_trimmed+wc_tag)
-        text_pieces.append(trailing_whitespace)
+
+
+        highlightcolor="#f5b7b1" if current_hname in risk_headers else color_highlight
+        section_highlighted=re.sub(r'(\$?\d[\d,]*\.?\d*\s?(?:percent|thousand|trillion dollars|billion dollars|million dollars|dollars|million|billion|trillion)?)', rf'<span style="background-color:{highlightcolor}; padding:1px 4px; border-radius:3px;">\1</span>', section_body_trimmed)
+        if current_hname=="Roast":
+            text_pieces.append(f'<div style="background-color:rgba(230,126,34,0.12); border-left:3px solid #e67e22; padding:10px 14px; margin-top:8px; border-radius:4px;">')
+            text_pieces.append(section_highlighted+wc_tag)
+            text_pieces.append('</div>')
+        else:
+            text_pieces.append(section_highlighted+wc_tag)
+        text_pieces.append(trailing_whitespace) 
         hnames_regen.append(current_hname)
         last_position=body_end
     text_pieces.append(rhighlighted[last_position:])
@@ -195,11 +207,11 @@ document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{docum
     with st.expander("**Tools** 🛠"):
         regen_meta=st.session_state.entry_meta.get(rkey)
         if regen_meta and hnames_regen:
+            st.markdown("<p style='font-size:0.8em; color:#888; margin-bottom:4px;'>Regenerate 🔄</p>", unsafe_allow_html=True)
             regen1, regen2=st.columns([3,1])
             with regen1:
                 regen_choice=st.selectbox("Regenerate a section", hnames_regen, key=f"regen_select_{rkey}")
             with regen2:
-                st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
                 if st.button("Regenerate", key=f"regen_btn_{rkey}"):
                     section_pattern=rf"### {re.escape(regen_choice)}.*?(?=\n### |\Z)"
                     old_section=re.search(section_pattern, rresult, re.DOTALL)
@@ -220,8 +232,9 @@ document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{docum
                             st.rerun()
                         except Exception as regen_error:
                             st.error(f"Couldn't regenerate {str(regen_error)}")
-            st.divider()
+            st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
 
+        st.markdown("<p style='font-size:0.8em; color:#888; margin-bottom:4px'>Trend & Sanity 📊</p>", unsafe_allow_html=True)
         if rkey not in st.session_state.trends:
             try:
                 trend_prompt=f'For "{rlabel}", is general public/media interest currently rising, flat, or declining? Reply with one word. If possible, usea real-time data, if not give a rough guess'
@@ -243,13 +256,15 @@ document.getElementById('copybtn').innerText='✅'; setTimeout(function(){{docum
                 st.session_state.sanity[rkey]=sanity_result
             except Exception as sanity_error:
                 st.session_state.sanity[rkey]=f"Couldn't run sanity check: {str(sanity_error)}"
+
         if rkey in st.session_state.sanity:
             if st.session_state.sanity[rkey]=="No contradictions found":
                 st.success(f"✅ {st.session_state.sanity[rkey]}")
             else:
                 st.warning(f"⚠️ {st.session_state.sanity[rkey]}")
 
-        st.divider()
+        st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:0.8em; color:#888; margin-bottom:4px;'>Questions ❓</p>", unsafe_allow_html=True)
 
         if rkey not in st.session_state.followups:
             st.session_state.followups[rkey]=[]
@@ -470,7 +485,9 @@ with col2:
 with col3:
     tone=st.radio("Character", ["Neutral", "Brutal"], horizontal=True, help="**Neutral**: balanced tone. **Brutal**: leads with what's most likely to fail, no softening.", disabled=st.session_state.is_running)
 
-persona=st.selectbox("Analyst Persona", ["Contrarian Analyst", "VC Pitch-Deck Skeptic", "Industry Insider", "Burned Founder"], help="Changes the analyst's voice and focus - **Contrarian Analyst:** default balanced skepticism. **VC Skeptic:** hunts for what kills a pitch. **Industry Insider:** focuses on operational/on-the-ground realities. **Burned Founder:** writes from hard personal failure experience, pattern-matches to past mistakes.", disabled=st.session_state.is_running)
+persona_display={"Contrarian Analyst 🟣": "Contrarian Analyst", "VC Pitch-Deck Skeptic 🔵": "VC Pitch-Deck Skeptic", "Industry Insider 🟢": "Industry Insider", "Burned Founder 🟠": "Burned Founder"}
+persona_choice=st.selectbox("Analyst Persona", list(persona_display.keys()), help="...")
+persona=persona_display[persona_choice]
 roast_mode=st.checkbox("Add a Roast 🔥", help="Appends one unhinged, maximally blunt paragraph at the end - separate from the formal analysis", disabled=st.session_state.is_running)
 
 current_combo=f"{mode}|{mode2}|{tone}"
@@ -534,6 +551,9 @@ hr {{border-color:{divider_color} !important;}}</style>""", unsafe_allow_html=Tr
 
 def handle_analyze():
     st.session_state.sharpen_decided=False
+    st.session_state.broad_decided=False
+    st.session_state.spelling_decided=False
+    st.session_state.multi_decided=False
     pending_input=st.session_state[f"input_{st.session_state.input_key}"].strip()
     if not pending_input:
         st.session_state.pending_warning="Please enter something."
@@ -753,7 +773,7 @@ else:
             familiarity=None
             if "Company" in first_line:
                 try:
-                    fam_response=client.messages.create(model="claude-haiku-4-20251001", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a well-known familiar company or is it an obscure not famous company? Reply EXACTLY: "Well-known" or "Obscure"'}])
+                    fam_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" a well-known familiar company or is it an obscure not famous company? Reply EXACTLY: "Well-known" or "Obscure"'}])
                     fam_text=fam_response.content[0].text.strip()
                     familiarity=fam_text if fam_text in ["Well-known", "Obscure"] else "Obscure"
                 except Exception:
@@ -764,9 +784,11 @@ else:
             st.session_state.is_running=False
             st.stop()
 
+
+
         if not st.session_state.get("sharpen_decided"):
             try:
-                sharpen_peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'Is "{cleaned_input}" vague enough to benefit from a sharper, more specific framing before analysis? If yes, reply EXACTLY: "Sharper: [better framing]". If it is already specific enough, reply EXACTLY: "Clear"'}])
+                sharpen_peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=35, messages=[{"role": "user", "content": f'Is "{cleaned_input}" vague enough to benefit from a sharper framing before analysis? A real, well-known company or product name is ALREADY specific enough on its own - only flag genuinely vague/generic descriptions(e.g, "a subscription app", "wireless earbuds"), never a real proper name by itself. If genuinely vague, reply EXACTLY: "Sharper: [better framing, 8 words max]". If already specific or a real named entity, reply EXACTLY: "Clear"'}])
                 sharpen_text=sharpen_peek.content[0].text.strip()
                 if sharpen_text.startswith("Sharper:"):
                     st.session_state.sharpen_suggestion=sharpen_text.replace("Sharper:", "").strip()
@@ -790,11 +812,113 @@ else:
                         st.session_state.sharpen_decided=True
                         st.session_state.is_running=True
                         st.rerun()
-                    st.stop()
+                st.stop()
             else:
                 st.session_state.sharpen_decided=True
         
 
+
+        if not st.session_state.get("broad_decided"):
+            try:
+                broad_peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=20, messages=[{"role": "user", "content": f'Does "{cleaned_input}" span multiple distinct industries or categories at once(too broad for one focused analysis)? If yes, reply EXACTLY: "Broad: [one suggested narrower version]". if its already focused, reply EXACTLY: "Focused"'}])
+                broad_text=broad_peek.content[0].text.strip()
+                if broad_text.startswith("Broad:"):
+                    st.session_state.broad_suggestion=broad_text.replace("Broad:", "").strip()
+                else:
+                    st.session_state.broad_suggestion=None
+            except Exception:
+                st.session_state.broad_suggestion=None
+
+            if st.session_state.broad_suggestion:
+                st.session_state.is_running=False
+                st.info(f"This input spans multiple industries, try to narrow it down or use this suggestion: **{st.session_state.broad_suggestion}**")
+                broad1, broad2, broad_extra=st.columns([2, 2, 5])
+                with broad1:
+                    if st.button("Use"):
+                        st.session_state.pending_input=st.session_state.broad_suggestion
+                        st.session_state.broad_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                with broad2:
+                    if st.button("Keep as-is"):
+                        st.session_state.broad_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                st.stop()
+            else:
+                st.session_state.broad_decided=True
+                
+
+
+        if not st.session_state.get("spelling_decided"):
+            try:
+                spell_peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": f'Is "{cleaned_input}" likely a misspelling of a well-known company or common term? If yes, reply EXACTLY: "Correction: [correct spelling]". If its correct as typed, reply EXACTLY: "Correct"'}])
+                spell_text=spell_peek.content[0].text.strip()
+                if spell_text.startswith("Correction:"):
+                    st.session_state.spelling_suggestion=spell_text.replace("Correction:", "").strip()
+                else:
+                    st.session_state.spelling_suggestion=None
+            except Exception:
+                st.session_state.spelling_suggestion=None
+
+            if st.session_state.spelling_suggestion:
+                st.session_state.is_running=False
+                st.info(f"Did you mean **{st.session_state.spelling_suggestion}**?")
+                spell1, spell2, spell_extra=st.columns([2,2,5])
+                with spell1:
+                    if st.button("Yes, use"):
+                        st.session_state.pending_input=st.session_state.spelling_suggestion
+                        st.session_state.spelling_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                with spell2:
+                    if st.button("No, keep as typed"):
+                        st.session_state.spelling_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                st.stop()
+            else:
+                st.session_state.spelling_decided=True
+
+
+
+        if not st.session_state.get("multi_decided"):
+            try:
+                multi_peek=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=25, messages=[{"role": "user", "content": f'Does "{cleaned_input}" mention two or more separate companies/ideas together(not one with a multi-word name)? If yes, reply EXACTLY: "Multi: [first] | [second]". If one entity, reply EXACTLY: "Single"'}])
+                multi_text=multi_peek.content[0].text.strip()
+                if multi_text.startswith("Multi:"):
+                    multi_parts=multi_text.replace("Multi:", "").strip().split("|")
+                    if len(multi_parts)==2:
+                        st.session_state.multi_options=(multi_parts[0].strip(), multi_parts[1].strip())
+                    else:
+                        st.session_state.multi_options=None
+                else:
+                    st.session_state.multi_options=None
+            except Exception:
+                st.session_state.multi_options=None
+
+
+            if st.session_state.multi_options:
+                st.session_state.is_running=False
+                opt_a, opt_b=st.session_state.multi_options
+                st.info(f"This looks like two separate entities. Which one do you want analyzed?")
+                multi1, multi2, multi_extra=st.columns([2, 2, 5])
+                with multi1:
+                    if st.button(opt_a):
+                        st.session_state.pending_input=opt_a
+                        st.session_state.multi_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                with multi2:
+                    if st.button(opt_b):
+                        st.session_state.pending_input=opt_b
+                        st.session_state.multi_decided=True
+                        st.session_state.is_running=True
+                        st.rerun()
+                st.stop()
+            else:
+                st.session_state.multi_decided=True
+                                
 
         st.markdown("""<style>@keyframes recognizeFade{from{opacity: 0;} to {opacity: 1;}} #recognize-msg{animation:recognizeFade 1.9s ease-in;}</style>""", unsafe_allow_html=True)
         if "Company" in first_line:                                                                                          
@@ -805,8 +929,17 @@ else:
             label=first_line.replace("[Idea:", "").replace("]", "").strip()
             bannert="Idea"
             bannerc=color_idea
-        st.markdown(f'<div id="recognize-msg" style="background-color:{bannerc}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{bannert}: {label}</div>', unsafe_allow_html=True)
+
+        try:
+            industry_response=client.messages.create(model="claude-haiku-4-5-20251001", max_tokens=10, messages=[{"role": "user", "content": f'In 1-3 words, what industry/category does "{cleaned_input}" belong to? Reply ONLY the category'}])
+            industry_tag=industry_response.content[0].text.strip()
+        except Exception:
+            industry_tag=None
+
+        badge_html=f'<span style="font-size:0.75em; opacity:0.85; margin-left:8px;">🏷️ {industry_tag}</span>' if industry_tag else ""
+        st.markdown(f'<div id="recognize-msg" style="background-color:{bannerc}; color:white; padding:10px 16px; border-radius:8px; font-weight:bold; font-size:1.1em;">{bannert}: {label} {badge_html}</div>', unsafe_allow_html=True)
         st.divider()
+        st.session_state.last_tag=industry_tag
 
         st.session_state.query_count+=1
         st.markdown(f"""<style>div[data-testid="stProgress"] {{position: fixed;
